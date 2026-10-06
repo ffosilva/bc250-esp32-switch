@@ -4,29 +4,31 @@
 //
 // BC250 PSU controller wiring:
 //
-//   ESP32-C3                      External
-//   --------                      --------
-//   GPIO5  (BUTTON_SENSE)  <-----> momentary switch terminal A
-//   GPIO6  (BUTTON_GND)    <-----> momentary switch terminal B
-//   GPIO4  (PS_ON_PIN)     <-----> ATX PS_ON# (green wire, active LOW)
-//   GPIO3  (BOARD_SENSE)   <-----> BC250 TPMS1 pin 9 (3.3V = board on)
+//   ESP32-WROOM (DevKitC)         External
+//   ---------------------         --------
+//   GPIO25 (BUTTON_SENSE)  <-----> momentary switch terminal A
+//   GPIO26 (BUTTON_GND)    <-----> momentary switch terminal B
+//   GPIO32 (PS_ON_PIN)     <-----> ATX PS_ON# (green wire, active LOW)
+//   GPIO34 (BOARD_SENSE)   <-----> BC250 TPMS1 pin 9 (3.3V = board on)
 //
-// The switch bridges GPIO5 and GPIO6. GPIO6 is driven LOW to act as a local
-// ground, and GPIO5 is read with an internal pull-up: pressed reads LOW.
-const int BUTTON_SENSE = 5;
-const int BUTTON_GND   = 6;
+// The switch bridges GPIO25 and GPIO26. GPIO26 is driven LOW to act as a local
+// ground, and GPIO25 is read with an internal pull-up: pressed reads LOW.
+const int BUTTON_SENSE = 25;
+const int BUTTON_GND   = 26;
 
 // ATX PS_ON# is active LOW and idles at ~5V (pulled up inside the PSU).
 // Driven as OPEN-DRAIN so we never push 3.3V against the PSU's 5V pull-up:
 //   LOW  -> sink to GND -> PSU on
 //   HIGH -> high-impedance -> PSU pull-up wins -> PSU off
-const int PS_ON_PIN = 4;
+const int PS_ON_PIN = 32;
 
 // BC250 TPMS1 (pin 9): reads ~3.3V while the board is powered/booted, 0 when
 // off. In practice it's a higher-impedance source that settles near ~2.9V and
 // hovers close to the ESP's digital logic threshold, so digitalRead() flickers.
 // We read it as an ADC voltage with hysteresis instead (see thresholds below).
-const int BOARD_SENSE = 3;
+// GPIO34 is ADC1_CH6 (input-only). It must be an ADC1 pin: ADC2 is unusable
+// while WiFi is running (setup portal).
+const int BOARD_SENSE = 34;
 
 // Hysteresis thresholds for the analog board-sense reading. The gap between
 // them keeps a noisy signal sitting near the threshold from chattering:
@@ -80,25 +82,35 @@ const unsigned long HEARTBEAT_MS = 1000;
 // SoftAP name shown when the device is in setup mode (open network).
 const char *const AP_SSID = "BC250 Switch Setup";
 
-// WiFi TX power for the SoftAP. These ESP32-C3 mini boards have an RF/power
-// design flaw (arduino-esp32 #6551): at full power the AP emits no usable
-// beacons, so the portal is invisible. A low value fixes it. WIFI_POWER_8_5dBm
-// is confirmed working on this board.
-#define AP_TX_POWER WIFI_POWER_8_5dBm
+// WiFi TX power for the SoftAP (the ESP32-C3 mini low-power workaround is not
+// needed on the ESP32-WROOM). Lower this if the AP misbehaves on a weak supply.
+#define AP_TX_POWER WIFI_POWER_19_5dBm
 
-//*******  BLE wake  ***************
+//*******  Classic Bluetooth wake  ***************
 
-// The bound controller's BLE MAC is configured via the setup portal and stored
-// in NVS (see config.h: config.wakeAddr). When the machine is OFF and that
-// controller is advertising, we power on ("machine follows controller").
+// Classic BT controllers don't advertise: a powered-on, paired controller PAGES
+// its bonded host's BD_ADDR. While the machine is OFF the ESP32 adopts the BC250
+// Bluetooth adapter's address (config.hostAddr) and listens for a page from the
+// bound controller (config.wakeAddr). Every page is rejected at the HCI
+// Connection_Request stage, so no link or authentication ever happens and the
+// controller's pairing with the BC250 is left untouched.
 
-// The controller counts as "present" while it has been seen within this window.
-// While OFF, presence => the machine powers on ("machine follows controller").
-const unsigned long BLE_PRESENCE_TIMEOUT_MS = 4000;
+// Local name / class of device advertised by the ESP32 (computer, desktop).
+const char *const BT_LOCAL_NAME = "BC250 Switch";
+const uint32_t    BT_COD        = 0x000104;
 
-// Guard window after any power-off during which BLE presence is ignored. This is
+// The controller counts as "present" while a page from it was seen within this
+// window. While OFF, presence => the machine powers on ("machine follows
+// controller"). Controllers re-page every ~1-2 s after a reject.
+const unsigned long BT_PRESENCE_TIMEOUT_MS = 4000;
+
+// Guard window after any power-off during which presence is ignored. This is
 // your chance to also switch the controller off (it then goes absent and the
 // machine stays down). If you leave the controller on, once this elapses the
-// machine follows it back on. It also rides out the brief reconnect-advertising
-// burst the controller emits when it loses its host at shutdown.
-const unsigned long BLE_WAKE_COOLDOWN_MS = 15000;
+// machine follows it back on. It also rides out the brief reconnect burst the
+// controller emits when it loses its host at shutdown.
+const unsigned long BT_WAKE_COOLDOWN_MS = 15000;
+
+// Portal-only device discovery duty cycle (keeps airtime free for the SoftAP).
+const unsigned long BT_INQUIRY_MS = 5000;   // inquiry length
+const unsigned long BT_IDLE_MS    = 10000;  // pause between inquiries

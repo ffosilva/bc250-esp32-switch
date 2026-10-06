@@ -1,75 +1,43 @@
 # BC250 ESP32 Power Switch
 
-An ESP32-C3 power controller for an AMD **BC250** board running as a desktop. The
+An ESP32 (ESP32-WROOM) power controller for an AMD **BC250** board running as a desktop. The
 BC250 is fed from a PCI-E connector and has no ATX power button, so this firmware
 drives the SFX PSU's `PS_ON#` line and senses board power, giving you a real power
-button — plus optional "turn on when I pick up my controller" via Bluetooth.
+button — plus optional "turn on when I pick up my controller" via classic Bluetooth.
 
 ## Features
 
 - **Push-button power**: tap to turn on; hold 5 s while running to force off.
 - **Follows the board**: if the OS shuts the board down, the PSU is cut automatically.
 - **Boot watchdog**: if the board doesn't come up within 10 s, the PSU is released.
-- **BLE controller wake** (optional): when a bound controller (e.g. an 8BitDo) powers
-  on, the machine powers on with it.
+- **Bluetooth controller wake** (optional, classic BR/EDR — not BLE): when a bound
+  controller (e.g. an 8BitDo) powers on, the machine powers on with it.
 - **WiFi setup portal**: configure the bound controller from a phone — no reflashing.
 
 ## Wiring
 
-The ESP32-C3 is permanently powered from the ATX connector's **5 V standby**, so it
-runs whether the machine is on or off. Share a common ground between the ESP, the PSU,
-and the board.
+The ESP32 is permanently powered from the ATX connector's **5 V standby** (into the
+DevKitC `5V` pin), so it runs whether the machine is on or off. Share a common ground
+between the ESP, the PSU, and the board.
 
-| ESP32-C3 | Connects to | Notes |
-|----------|-------------|-------|
-| GPIO5 | Momentary switch, terminal A | Read with internal pull-up |
-| GPIO6 | Momentary switch, terminal B | Driven LOW as the switch's ground |
-| GPIO4 | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
-| GPIO3 | BC250 `TPMS1` (pin 9) | ~3.3 V when the board is up, 0 when off |
-| 5VSB / GND | PSU standby + common ground | Permanent power for the ESP |
+| ESP32 (DevKitC) | Connects to | Notes |
+|-----------------|-------------|-------|
+| GPIO25 | Momentary switch, terminal A | Read with internal pull-up |
+| GPIO26 | Momentary switch, terminal B | Driven LOW as the switch's ground |
+| GPIO32 | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
+| GPIO34 | BC250 `TPMS1` (pin 9) | ~3.3 V when the board is up, 0 when off (ADC1, input-only) |
+| 5V / GND | PSU standby + common ground | Permanent power for the ESP |
 
-`PS_ON#` idles at ~5 V (pulled up inside the PSU). GPIO4 is driven open-drain so the
-3.3 V part never fights the 5 V rail — it only ever sinks to ground to switch the PSU on.
+> **`PS_ON#` is 5 V.** It idles at ~5 V (pulled up inside the PSU), above the ESP32's
+> GPIO maximum (~3.6 V). Open-drain keeps the ESP from *driving* 5 V, but the pin still
+> sees it. A small N-MOSFET/NPN buffer (or at least a ~1 kΩ series resistor) is
+> **recommended** — see [docs/pinout.md](docs/pinout.md#ps_on-5-v-caution-recommended-buffer).
 
 `TPMS1` is a higher-impedance signal that hovers near the logic threshold, so it's read
 as an analog voltage with hysteresis rather than a digital pin.
 
-### Connector pinouts
-
-**ATX 24-pin main connector** — tap three pins:
-
-```
-               +3.3V ─┤  1 │ 13 ├─ +3.3V
-               +3.3V ─┤  2 │ 14 ├─ −12V
-                 GND ─┤  3 │ 15 ├─ GND
-                 +5V ─┤  4 │ 16 ├─ PS_ON#   ◄── GPIO4  (green, open-drain, active LOW)
-                 GND ─┤  5 │ 17 ├─ GND      ◄── ESP GND (any GND pin works)
-                 +5V ─┤  6 │ 18 ├─ GND
-                 GND ─┤  7 │ 19 ├─ GND
-              PWR_OK ─┤  8 │ 20 ├─ (RSVD)
-ESP 5V/VIN ◄── +5VSB ─┤  9 │ 21 ├─ +5V
-                +12V ─┤ 10 │ 22 ├─ +5V
-                +12V ─┤ 11 │ 23 ├─ +5V
-               +3.3V ─┤ 12 │ 24 ├─ GND
-```
-
-**TPMS1 header** — single pin for board-power sense:
-
-```
-   PCICLK ─┤  1   2 ├─ GND
-    FRAME ─┤  3   4 ├─ SMB_CLK_MAIN
-  PCIRST# ─┤  5   6 ├─ SMB_DATA_MAIN
-     LAD3 ─┤  7   8 ├─ LAD2
-       3V ─┤  9  10 ├─ LAD1      ◄── pin 9 (3V) = board-on sense ──► GPIO3
-     LAD0 ─┤ 11  12 ├─ GND
-          ─┤     14 ├─ S_PWRDWN#
-     3VSB ─┤ 15  16 ├─ SERIRQ#
-      GND ─┤ 17  18 ├─ GND
-```
-
-Pin 9 is the only TPMS1 pin used: it reads ~3.3 V when the board is powered and 0 V when
-off. No ground wire is needed from this header — the ESP already shares ground with the
-board through the ATX connector.
+**Full pinout, DevKitC header diagram, ATX 24-pin and TPMS1 connector diagrams, and the
+`PS_ON#` buffer circuit: [docs/pinout.md](docs/pinout.md).**
 
 ## Button controls
 
@@ -83,10 +51,29 @@ The button is the primary control and always works, even with no controller conf
 
 ## Bluetooth controller wake
 
+This uses **classic Bluetooth (BR/EDR)**, the kind used by most gamepads when paired to
+a PC. A powered-on, paired classic controller doesn't advertise; it *pages* its host.
+So while the machine is **off**, the ESP32 takes on the BC250's Bluetooth adapter
+address and listens for a page from your controller:
+
+1. The controller turns on and pages the BC250's adapter address → the ESP32 hears it.
+2. The ESP32 **rejects** the connection (no link, no authentication, so the controller's
+   pairing with the BC250 is never touched) but counts it as "controller present", and
+   powers the machine on.
+3. Once the machine is powering on, the ESP32 goes silent (stops answering pages). The
+   controller's next attempt reaches the real BC250 adapter and connects normally.
+
 When a controller is bound (via the portal), the machine **follows the controller**:
 turn the controller on and the machine powers up. After a power-off there's a short
 guard window so the controller's reconnect burst can't immediately switch it back on —
 turn the controller off within that window to keep the machine down.
+
+Requirements:
+
+- The controller must already be **paired to the BC250**.
+- You must give the ESP32 the BC250 Bluetooth **adapter MAC**: on Linux run
+  `bluetoothctl show` (the `Controller aa:bb:cc:dd:ee:ff` line); on Windows, Device
+  Manager → Bluetooth adapter → Properties → Advanced.
 
 ## Setup portal
 
@@ -94,8 +81,11 @@ Hold the button ≥ 8 s while off (or on first use) to start the portal:
 
 1. Connect to the open WiFi network **`BC250 Switch Setup`** and open `http://192.168.4.1`.
 2. Create a password.
-3. Pick your controller from the live BLE scan (or enter its MAC).
-4. Finish — the device reboots into normal operation.
+3. Enter the BC250's Bluetooth adapter MAC.
+4. Pick your controller: turn on a controller that's already paired to the BC250 (it
+   shows up as **paired**), or put one in pairing mode (it shows up after a scan). You
+   can also enter its MAC manually.
+5. Finish — the device reboots into normal operation.
 
 ## Build & flash
 
@@ -103,15 +93,16 @@ PlatformIO (pioarduino). Two steps — firmware and the portal's web UI (a singl
 `app/index.html` packed into SPIFFS):
 
 ```bash
-pio run -t upload     # firmware
+pio run -t upload     # firmware (env: esp32dev)
 pio run -t uploadfs   # web UI filesystem
 ```
 
 ## Notes
 
-- **WiFi TX power**: these ESP32-C3 *mini* boards have an RF/power quirk
-  ([arduino-esp32 #6551](https://github.com/espressif/arduino-esp32/issues/6551)) where
-  the SoftAP is invisible at full power. The portal sets `WIFI_POWER_8_5dBm`
-  (`AP_TX_POWER` in [include/board.h](include/board.h)) to work around it.
-- Serial debug runs over USB-CDC at **115200** baud.
+- **Migrating from the ESP32-C3 build**: the C3 has no classic Bluetooth, so it's no
+  longer supported. A one-time `pio run -t erase` before flashing clears the old
+  settings; the portal then asks for the new adapter MAC.
+- **WiFi TX power** for the portal's SoftAP is `AP_TX_POWER` in
+  [include/board.h](include/board.h).
+- Serial debug runs over the DevKitC's USB-UART at **115200** baud.
 - Pin assignments and all timing constants live in [include/board.h](include/board.h).

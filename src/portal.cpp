@@ -7,11 +7,11 @@
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 #include <ESPAsyncWebServer.h>
-#include <NimBLEDevice.h>
 #include <esp_random.h>
 #include "mbedtls/sha256.h"
 
 #include "board.h"
+#include "bt_classic.h"
 #include "config.h"
 
 static const size_t MIN_PASSWORD_LEN = 6;
@@ -25,52 +25,6 @@ static String          g_token;
 
 // Deferred restart (so the HTTP response can flush before we reboot).
 static unsigned long   g_restartAt = 0;
-
-// --- BLE device discovery (active scan, accumulated for the picker) ---
-struct BleDev {
-  char addr[18];
-  char name[33];
-  int  rssi;
-  bool used;
-};
-static const int       MAX_DEVS = 48;
-static BleDev          devs[MAX_DEVS];
-static portMUX_TYPE    devsMux = portMUX_INITIALIZER_UNLOCKED;
-
-class SetupScanCallbacks : public NimBLEScanCallbacks {
-  void onResult(const NimBLEAdvertisedDevice *d) override {
-    std::string addrStr = d->getAddress().toString();
-    const char *addr = addrStr.c_str();
-    std::string name = d->getName();
-    int rssi = d->getRSSI();
-
-    portENTER_CRITICAL(&devsMux);
-    int idx = -1, free = -1;
-    for (int i = 0; i < MAX_DEVS; i++) {
-      if (devs[i].used) {
-        if (strcmp(devs[i].addr, addr) == 0) { idx = i; break; }
-      } else if (free < 0) {
-        free = i;
-      }
-    }
-    if (idx < 0 && free >= 0) {
-      idx = free;
-      devs[idx].used = true;
-      strncpy(devs[idx].addr, addr, sizeof(devs[idx].addr) - 1);
-      devs[idx].addr[sizeof(devs[idx].addr) - 1] = 0;
-      devs[idx].name[0] = 0;
-    }
-    if (idx >= 0) {
-      devs[idx].rssi = rssi;
-      if (!name.empty()) {
-        strncpy(devs[idx].name, name.c_str(), sizeof(devs[idx].name) - 1);
-        devs[idx].name[sizeof(devs[idx].name) - 1] = 0;
-      }
-    }
-    portEXIT_CRITICAL(&devsMux);
-  }
-};
-static SetupScanCallbacks scanCallbacks;
 
 // --- Helpers ---
 
@@ -120,6 +74,7 @@ static void handleStatus(AsyncWebServerRequest *req) {
   JsonDocument doc;
   doc["passwordSet"] = config.passHash.length() > 0;
   doc["wakeAddr"]    = config.wakeAddr;
+  doc["hostAddr"]    = config.hostAddr;
   doc["configured"]  = isConfigured();
   String out;
   serializeJson(doc, out);
@@ -168,38 +123,62 @@ static void handleLogin(AsyncWebServerRequest *req, JsonVariant &json) {
   req->send(200, "application/json", out);
 }
 
-static void handleBleDevices(AsyncWebServerRequest *req) {
+static void handleBtDevices(AsyncWebServerRequest *req) {
   if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
 
-  // Snapshot under the lock, then build JSON without holding it.
-  BleDev snap[MAX_DEVS];
-  portENTER_CRITICAL(&devsMux);
-  memcpy(snap, devs, sizeof(devs));
-  portEXIT_CRITICAL(&devsMux);
+  static const int MAX_OUT = 48;
+  BtDev snap[MAX_OUT];
+  int n = btSnapshotDevices(snap, MAX_OUT);
 
   JsonDocument doc;
   JsonArray arr = doc["devices"].to<JsonArray>();
-  for (int i = 0; i < MAX_DEVS; i++) {
-    if (!snap[i].used) continue;
+  for (int i = 0; i < n; i++) {
     JsonObject o = arr.add<JsonObject>();
-    o["addr"] = snap[i].addr;
-    o["name"] = snap[i].name;
-    o["rssi"] = snap[i].rssi;
+    o["addr"]   = snap[i].addr;
+    o["name"]   = snap[i].name;
+    o["rssi"]   = snap[i].rssi;
+    o["cod"]    = snap[i].cod;
+    o["paged"]  = snap[i].paged;
   }
   String out;
   serializeJson(doc, out);
   req->send(200, "application/json", out);
 }
 
-static void handleBleSelect(AsyncWebServerRequest *req, JsonVariant &json) {
-  if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
+// Validate + normalise a posted MAC. Returns false (and replies 400) if bad.
+static bool readMac(AsyncWebServerRequest *req, JsonVariant &json, String &addr) {
   JsonObject o = json.as<JsonObject>();
-  String addr = o["addr"] | "";
-  if (addr.length() != 17) {  // "aa:bb:cc:dd:ee:ff"
-    sendJsonError(req, 400, "invalid address");
-    return;
-  }
+  addr = o["addr"] | "";
+  addr.trim();
   addr.toLowerCase();
+  if (!btValidMac(addr)) {
+    sendJsonError(req, 400, "invalid address");
+    return false;
+  }
+  return true;
+}
+
+static void handleBtHost(AsyncWebServerRequest *req, JsonVariant &json) {
+  if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
+  String addr;
+  if (!readMac(req, json, addr)) return;
+  if (addr != config.hostAddr) {
+    setHostAddr(addr);
+    // Re-init the controller under the new identity so learn mode can see
+    // controllers that page this host.
+    if (btRestart(addr)) {
+      btSetConnectable(true);
+      btSetDiscovery(true);
+    }
+  }
+  Serial.printf("[PORTAL] host adapter %s\n", addr.c_str());
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void handleBtSelect(AsyncWebServerRequest *req, JsonVariant &json) {
+  if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
+  String addr;
+  if (!readMac(req, json, addr)) return;
   setWakeAddr(addr);
   Serial.printf("[PORTAL] bound controller %s\n", addr.c_str());
   req->send(200, "application/json", "{\"ok\":true}");
@@ -231,9 +210,7 @@ void portalBegin() {
   }
 
   bool ok = WiFi.softAP(AP_SSID);  // open network
-  // These C3 mini boards have an RF/power design flaw (arduino-esp32 #6551):
-  // at full TX power the SoftAP emits no usable beacons. Lowering TX power makes
-  // it work. Must be set AFTER softAP().
+  // Must be set AFTER softAP().
   WiFi.setTxPower(AP_TX_POWER);
   Serial.printf("[PORTAL] softAP ret=%d ssid='%s' ip=%s txpwr=%d\n", ok, AP_SSID,
                 WiFi.softAPIP().toString().c_str(), WiFi.getTxPower());
@@ -241,23 +218,24 @@ void portalBegin() {
   dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
   dnsServer.start(53, "*", WiFi.softAPIP());
 
-  // BLE active scan so the picker shows device names + live RSSI. Keep the duty
-  // cycle LOW (window << interval): WiFi and BLE share the C3's single radio, so
-  // a high-duty scan starves the SoftAP and its beacons never go out.
-  NimBLEDevice::init("");
-  NimBLEScan *scan = NimBLEDevice::getScan();
-  scan->setScanCallbacks(&scanCallbacks, true);
-  scan->setActiveScan(true);
-  scan->setInterval(500);  // ms
-  scan->setWindow(45);     // ms (~9% duty, leaves the radio free for WiFi)
-  scan->start(0, false);
+  // Bluetooth discovery for the picker. Inquiry runs at a low duty cycle
+  // (BT_INQUIRY_MS on / BT_IDLE_MS off) so the SoftAP keeps its airtime. If the
+  // host MAC is already known we also answer pages (learn mode): turning on a
+  // controller that's paired to the BC250 makes it show up here.
+  if (!config.hostAddr.isEmpty()) {
+    if (btBegin(config.hostAddr)) {
+      btSetConnectable(true);
+      btSetDiscovery(true);
+    }
+  }
 
   server.on("/api/status", HTTP_GET, handleStatus);
-  server.on("/api/ble/devices", HTTP_GET, handleBleDevices);
+  server.on("/api/bt/devices", HTTP_GET, handleBtDevices);
   server.on("/api/finish", HTTP_POST, handleFinish);
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/password", handlePassword));
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/login", handleLogin));
-  server.addHandler(new AsyncCallbackJsonWebHandler("/api/ble/select", handleBleSelect));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/bt/host", handleBtHost));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/bt/select", handleBtSelect));
 
   server.on("/", HTTP_GET, serveIndex);
   server.onNotFound([](AsyncWebServerRequest *req) {
@@ -274,6 +252,7 @@ void portalBegin() {
 
 void portalLoop() {
   dnsServer.processNextRequest();
+  btLoop();
 
   // Button held in setup mode = escape back to normal mode (only useful once
   // configured; an unconfigured device just re-enters setup).

@@ -34,6 +34,10 @@
     .dev .nm small { color:var(--muted); }
     .dev .rssi { color:var(--muted); font-size:12px; white-space:nowrap; }
     .row { display:flex; gap:10px; } .row > * { flex:1; }
+    .tag { font-size:11px; padding:1px 6px; border-radius:6px; margin-left:6px;
+           border:1px solid var(--ok); color:var(--ok); font-weight:normal; }
+    .help { color:var(--muted); font-size:12px; line-height:1.5; margin-top:10px; }
+    .help code { color:var(--fg); }
     .scanning { color:var(--muted); font-size:12px; margin:6px 0; }
   </style>
 </head>
@@ -55,10 +59,31 @@
       <div class="msg" id="pass-msg"></div>
     </div>
 
+    <!-- Host adapter screen -->
+    <div class="card hidden" id="screen-host">
+      <div style="font-size:15px;font-weight:bold">BC250 Bluetooth adapter</div>
+      <div class="sub" style="margin:6px 0 0">
+        While the machine is off, this device answers as the BC250's Bluetooth
+        adapter so your paired controller wakes it.
+      </div>
+      <label for="host">Adapter MAC address</label>
+      <input id="host" placeholder="aa:bb:cc:dd:ee:ff" autocapitalize="off" />
+      <div class="help">
+        Find it on the BC250:<br>
+        Linux: <code>bluetoothctl show</code> (the <code>Controller</code> line)<br>
+        Windows: Device Manager &rarr; Bluetooth adapter &rarr; Properties &rarr; Advanced
+      </div>
+      <button id="host-btn" disabled>Continue</button>
+      <div class="msg" id="host-msg"></div>
+    </div>
+
     <!-- Device selection screen -->
     <div class="card hidden" id="screen-dev">
       <div style="font-size:15px;font-weight:bold">Select your controller</div>
-      <div class="sub" style="margin:6px 0 0">Turn the controller on so it appears below.</div>
+      <div class="sub" style="margin:6px 0 0">
+        Turn on a controller that is already paired to the BC250 (it shows as
+        <b>paired</b>), or put one in pairing mode (it shows up after a scan).
+      </div>
       <div class="scanning" id="scan-state">Scanning…</div>
       <div id="dev-list"></div>
       <label for="manual">Or enter a MAC manually</label>
@@ -90,6 +115,7 @@
 
     function show(screen) {
       $("screen-pass").classList.toggle("hidden", screen !== "pass");
+      $("screen-host").classList.toggle("hidden", screen !== "host");
       $("screen-dev").classList.toggle("hidden", screen !== "dev");
     }
 
@@ -116,7 +142,7 @@
         const path = creating ? "/api/password" : "/api/login";
         const data = await api(path, "POST", { password: pw });
         token = data.token;
-        gotoDeviceScreen();
+        gotoHostScreen();
       } catch (e) {
         msg.className = "msg err"; msg.textContent = e.message;
       } finally {
@@ -124,11 +150,41 @@
       }
     };
 
+    // --- Host adapter screen ---
+    const MAC_RE = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/;
+    const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+    async function gotoHostScreen() {
+      try {
+        const st = await api("/api/status");
+        if (st.hostAddr) $("host").value = st.hostAddr;
+      } catch (e) { /* ignore */ }
+      $("host-btn").disabled = !MAC_RE.test($("host").value.trim().toLowerCase());
+      show("host");
+    }
+
+    $("host").oninput = () => {
+      $("host-btn").disabled = !MAC_RE.test($("host").value.trim().toLowerCase());
+    };
+
+    $("host-btn").onclick = async () => {
+      const msg = $("host-msg");
+      msg.className = "msg";
+      try {
+        $("host-btn").disabled = true;
+        await api("/api/bt/host", "POST", { addr: $("host").value.trim().toLowerCase() });
+        gotoDeviceScreen();
+      } catch (e) {
+        msg.className = "msg err"; msg.textContent = e.message;
+        $("host-btn").disabled = false;
+      }
+    };
+
     // --- Device screen ---
     function gotoDeviceScreen() {
       show("dev");
       pollDevices();
-      pollTimer = setInterval(pollDevices, 2000);
+      if (!pollTimer) pollTimer = setInterval(pollDevices, 2000);
     }
 
     function rssiBars(r) {
@@ -140,8 +196,10 @@
 
     async function pollDevices() {
       try {
-        const data = await api("/api/ble/devices");
-        const list = (data.devices || []).sort((a, b) => b.rssi - a.rssi);
+        const data = await api("/api/bt/devices");
+        // Paired controllers (seen paging the host) first, then by signal.
+        const list = (data.devices || []).sort(
+          (a, b) => (b.paged - a.paged) || (b.rssi - a.rssi));
         $("scan-state").textContent = list.length
           ? "Scanning… " + list.length + " device(s) seen"
           : "Scanning… (no devices yet)";
@@ -151,9 +209,11 @@
           const el = document.createElement("div");
           el.className = "dev" + (selected === d.addr ? " sel" : "");
           el.innerHTML =
-            '<div class="nm"><b>' + (d.name || "(unknown)") + "</b>" +
-            "<small>" + d.addr + "</small></div>" +
-            '<div class="rssi">' + rssiBars(d.rssi) + "<br>" + d.rssi + " dBm</div>";
+            '<div class="nm"><b>' + esc(d.name || "(unknown)") +
+            (d.paged ? '<span class="tag">paired</span>' : "") + "</b>" +
+            "<small>" + esc(d.addr) + "</small></div>" +
+            '<div class="rssi">' +
+            (d.rssi ? rssiBars(d.rssi) + "<br>" + d.rssi + " dBm" : "&nbsp;") + "</div>";
           el.onclick = () => { selected = d.addr; $("manual").value = ""; refreshSel(); };
           box.appendChild(el);
         }
@@ -181,9 +241,9 @@
       msg.className = "msg";
       try {
         $("save-btn").disabled = true;
-        await api("/api/ble/select", "POST", { addr: selected });
+        await api("/api/bt/select", "POST", { addr: selected });
         await api("/api/finish", "POST", {});
-        if (pollTimer) clearInterval(pollTimer);
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         msg.className = "msg ok";
         msg.textContent = "Bound " + selected + ". Rebooting into normal mode…";
         $("scan-state").textContent = "";
