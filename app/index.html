@@ -88,6 +88,7 @@
       <div id="dev-list"></div>
       <label for="manual">Or enter a MAC manually</label>
       <input id="manual" placeholder="aa:bb:cc:dd:ee:ff" />
+
       <button id="save-btn" disabled>Bind controller &amp; finish</button>
       <div class="msg" id="dev-msg"></div>
     </div>
@@ -181,7 +182,15 @@
     };
 
     // --- Device screen ---
-    function gotoDeviceScreen() {
+    async function gotoDeviceScreen() {
+      try {
+        const st = await api("/api/status");
+        if (st.wakeAddr && !selected) {
+          $("manual").value = st.wakeAddr;
+          selected = st.wakeAddr;
+          refreshSel();
+        }
+      } catch (e) { /* ignore */ }
       show("dev");
       pollDevices();
       if (!pollTimer) pollTimer = setInterval(pollDevices, 2000);

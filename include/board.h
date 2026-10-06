@@ -114,3 +114,4 @@ const unsigned long BT_WAKE_COOLDOWN_MS = 15000;
 // Portal-only device discovery duty cycle (keeps airtime free for the SoftAP).
 const unsigned long BT_INQUIRY_MS = 5000;   // inquiry length
 const unsigned long BT_IDLE_MS    = 10000;  // pause between inquiries
+

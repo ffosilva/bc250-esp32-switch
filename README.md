@@ -52,14 +52,17 @@ The button is the primary control and always works, even with no controller conf
 ## Bluetooth controller wake
 
 This uses **classic Bluetooth (BR/EDR)**, the kind used by most gamepads when paired to
-a PC. A powered-on, paired classic controller doesn't advertise; it *pages* its host.
-So while the machine is **off**, the ESP32 takes on the BC250's Bluetooth adapter
-address and listens for a page from your controller:
+a PC (DualShock 4 / DualSense, Xbox Wireless, 8BitDo, Nintendo Switch Pro Controller / Joy-Con).
 
-1. The controller turns on and pages the BC250's adapter address → the ESP32 hears it.
-2. The ESP32 **rejects** the connection (no link, no authentication, so the controller's
-   pairing with the BC250 is never touched) but counts it as "controller present", and
-   powers the machine on.
+A powered-on, paired classic controller doesn't advertise; it *pages* its bonded host.
+While the machine is **off**, the ESP32 takes on the BC250's Bluetooth adapter address
+and runs **continuous, interlaced page listening**:
+
+1. You turn on the controller (e.g. press the **HOME button** on a Switch controller, or
+   power button on an 8BitDo/Xbox/PS controller) → the controller pages its host.
+2. The ESP32 catches the page and **rejects** the connection (no link, no authentication,
+   so the controller's pairing with the BC250 is never touched) but counts it as
+   "controller present", and powers the machine on.
 3. Once the machine is powering on, the ESP32 goes silent (stops answering pages). The
    controller's next attempt reaches the real BC250 adapter and connects normally.
 

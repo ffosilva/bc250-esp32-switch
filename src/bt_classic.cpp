@@ -16,10 +16,12 @@ extern "C" bool btInUse() {
 // ---- HCI opcodes (OGF<<10 | OCF) -------------------------------------------
 static const uint16_t OP_RESET              = 0x0C03;
 static const uint16_t OP_WRITE_LOCAL_NAME   = 0x0C13;
+static const uint16_t OP_WRITE_PAGE_TIMEOUT = 0x0C18;
 static const uint16_t OP_WRITE_SCAN_ENABLE  = 0x0C1A;
 static const uint16_t OP_WRITE_PAGE_SCAN_ACT= 0x0C1C;
 static const uint16_t OP_WRITE_COD          = 0x0C24;
 static const uint16_t OP_WRITE_INQUIRY_MODE = 0x0C45;
+static const uint16_t OP_WRITE_PAGE_SCAN_TYPE = 0x0C47;
 static const uint16_t OP_INQUIRY            = 0x0401;
 static const uint16_t OP_REJECT_CONN_REQ    = 0x040A;
 static const uint16_t OP_REMOTE_NAME_REQ    = 0x0419;
@@ -215,6 +217,9 @@ static int onHostRecv(uint8_t *data, uint16_t len) {
 
   switch (code) {
     case EVT_CMD_COMPLETE:
+      cmdPending = false;
+      break;
+
     case EVT_CMD_STATUS:
       cmdPending = false;
       break;
@@ -288,8 +293,10 @@ static void queueInit() {
   strncpy((char *)name, BT_LOCAL_NAME, sizeof(name) - 1);
   uint8_t cod[3] = {(uint8_t)(BT_COD & 0xFF), (uint8_t)((BT_COD >> 8) & 0xFF),
                     (uint8_t)((BT_COD >> 16) & 0xFF)};
-  // Page scan: interval 320 ms, window 160 ms (only active while OFF).
-  uint8_t psa[4] = {0x00, 0x02, 0x00, 0x01};
+  // 100% continuous page scan: interval = 160 ms, window = 160 ms.
+  // With window == interval, the radio never pauses listening during page scan.
+  uint8_t psa[4] = {0x00, 0x01, 0x00, 0x01};
+  uint8_t pageScanType = 0x01;  // Interlaced scan (much faster page correlation)
   uint8_t inqMode = 0x02;  // extended inquiry results
   uint8_t scanOff = 0x00;
 
@@ -297,6 +304,7 @@ static void queueInit() {
   enqueue(OP_WRITE_LOCAL_NAME, name, sizeof(name));
   enqueue(OP_WRITE_COD, cod, sizeof(cod));
   enqueue(OP_WRITE_PAGE_SCAN_ACT, psa, sizeof(psa));
+  enqueue(OP_WRITE_PAGE_SCAN_TYPE, &pageScanType, 1);
   enqueue(OP_WRITE_INQUIRY_MODE, &inqMode, 1);
   enqueue(OP_WRITE_SCAN_ENABLE, &scanOff, 1);
 }

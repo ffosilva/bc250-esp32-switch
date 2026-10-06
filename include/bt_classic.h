@@ -28,8 +28,8 @@ void btLoop();
 
 // ---- Normal mode: bound-controller presence -------------------------------
 void btSetWakeAddr(const String &addr);
-// True if the bound controller has ever paged us; *lastSeenMs = millis() of the
-// most recent page.
+// True if the bound controller has ever paged us;
+// *lastSeenMs = millis() of the most recent sighting.
 bool btWakeSeen(unsigned long *lastSeenMs);
 
 // ---- Portal: device discovery ---------------------------------------------
