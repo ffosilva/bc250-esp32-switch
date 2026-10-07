@@ -40,9 +40,9 @@ between the ESP, the PSU, and the board.
 > **recommended** — see [docs/pinout.md](docs/pinout.md#ps_on-5-v-caution-recommended-buffer).
 
 `TPMS1` is a higher-impedance signal that hovers near the logic threshold, so it's read
-as an analog voltage with hysteresis rather than a digital pin (ADC1 on DevKitC, ADC2_CH4 on CAM).
+as an analog voltage with hysteresis rather than a digital pin (ADC1 on DevKitC and ESP32-C3; digital input with pull-down on ESP32-CAM).
 
-**Full pinout, header diagrams for DevKitC and ESP32-CAM, ATX 24-pin and TPMS1 connector diagrams, and the
+**Full pinout, header diagrams for DevKitC, ESP32-CAM, and ESP32-C3, ATX 24-pin and TPMS1 connector diagrams, and the
 `PS_ON#` buffer circuit: [docs/pinout.md](docs/pinout.md).**
 
 ## Button controls

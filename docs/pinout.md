@@ -96,18 +96,50 @@ The ESP32-CAM has two 8-pin headers (antenna at top):
          └─────────────────────────┘
 ```
 
+## ESP32-C3 (DevKitM-1) header
+
+![ESP32-C3-DevKitM-1 Pinout](images/esp32-c3-devkitm-1-pinout.png)
+
+The ESP32-C3-DevKitM-1 has two 15-pin headers (antenna at top, USB at bottom):
+
+```
+           ┌─────────────────────────────┐
+           │         [ Antenna ]         │
+           │                             │
+       GND │                             │ GND
+       3V3 │                             │ IO21 (TX)
+       3V3 │                             │ IO20 (RX)
+       IO2 │                             │ GND
+IO3 (ADC1) │ ◄─ TPMS1 pin 9              │ IO9  (BOOT)
+       GND │                             │ IO8  (RGB)
+       RST │                             │ GND
+       GND │                             │ IO7
+       IO0 │                             │ IO6  ──► switch B (driven LOW)
+       IO1 │                             │ IO5  ◄── switch A (pull-up)
+      IO10 │                             │ IO4  ──► PS_ON# (open-drain)
+       GND │                             │ GND
+        5V │ ◄─ PSU +5VSB                │ IO18 (USB D-)
+        5V │                             │ IO19 (USB D+)
+       GND │ ◄─ common ground            │ GND
+           │          [ USB ]            │
+           └─────────────────────────────┘
+```
+
+> **Note on ESP32-C3 SuperMini:** If using an ESP32-C3 SuperMini board, the same GPIO numbers
+> apply (`GPIO3`, `GPIO4`, `GPIO5`, `GPIO6`), but check the board's silkscreen labels for physical pin positions.
+
 ## Connections
 
 ```
  PSU +5VSB ────────────────────────► ESP32 5V / VIN
  PSU GND ──────────────────────────► ESP32 GND  (common ground, also to the BC250)
 
- Switch terminal A ────────────────► GPIO25   (internal pull-up)
- Switch terminal B ────────────────► GPIO26   (driven LOW = local ground)
+ Switch terminal A ────────────────► DevKitC: GPIO25 | CAM: GPIO15 | C3: GPIO5  (pull-up)
+ Switch terminal B ────────────────► DevKitC: GPIO26 | CAM: GND    | C3: GPIO6  (driven LOW / GND)
 
- PSU PS_ON# (green) ──[optional buffer, see below]── GPIO32  (open-drain, active LOW)
+ PSU PS_ON# (green) ──[optional buffer, see below]── DevKitC: GPIO32 | CAM: GPIO14 | C3: GPIO4  (open-drain, active LOW)
 
- BC250 TPMS1 pin 9 ────────────────► GPIO34   (analog, ADC1)
+ BC250 TPMS1 pin 9 ────────────────► DevKitC: GPIO34 | CAM: GPIO13 | C3: GPIO3  (3.3V board sense)
 ```
 
 ### `PS_ON#` 5 V caution (recommended buffer)
