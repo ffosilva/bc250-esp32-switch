@@ -44,6 +44,10 @@ void setForceSetup(bool force) {
 }
 
 bool isConfigured() {
+#if defined(WAKE_BLE)
+  return config.passHash.length() > 0 && config.wakeAddr.length() > 0;
+#else
   return config.passHash.length() > 0 && config.wakeAddr.length() > 0 &&
          config.hostAddr.length() > 0;
+#endif
 }

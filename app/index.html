@@ -80,7 +80,7 @@
     <!-- Device selection screen -->
     <div class="card hidden" id="screen-dev">
       <div style="font-size:15px;font-weight:bold">Select your controller</div>
-      <div class="sub" style="margin:6px 0 0">
+      <div class="sub" id="dev-sub" style="margin:6px 0 0">
         Turn on a controller that is already paired to the BC250 (it shows as
         <b>paired</b>), or put one in pairing mode (it shows up after a scan).
       </div>
@@ -98,6 +98,8 @@
     let token = null;
     let selected = null;
     let pollTimer = null;
+    let needsHost = true;
+    let mode = "classic";
 
     const $ = (id) => document.getElementById(id);
 
@@ -143,7 +145,11 @@
         const path = creating ? "/api/password" : "/api/login";
         const data = await api(path, "POST", { password: pw });
         token = data.token;
-        gotoHostScreen();
+        if (needsHost) {
+          gotoHostScreen();
+        } else {
+          gotoDeviceScreen();
+        }
       } catch (e) {
         msg.className = "msg err"; msg.textContent = e.message;
       } finally {
@@ -173,7 +179,7 @@
       msg.className = "msg";
       try {
         $("host-btn").disabled = true;
-        await api("/api/bt/host", "POST", { addr: $("host").value.trim().toLowerCase() });
+        await api("/api/host", "POST", { addr: $("host").value.trim().toLowerCase() });
         gotoDeviceScreen();
       } catch (e) {
         msg.className = "msg err"; msg.textContent = e.message;
@@ -205,7 +211,7 @@
 
     async function pollDevices() {
       try {
-        const data = await api("/api/bt/devices");
+        const data = await api("/api/devices");
         // Paired controllers (seen paging the host) first, then by signal.
         const list = (data.devices || []).sort(
           (a, b) => (b.paged - a.paged) || (b.rssi - a.rssi));
@@ -250,7 +256,7 @@
       msg.className = "msg";
       try {
         $("save-btn").disabled = true;
-        await api("/api/bt/select", "POST", { addr: selected });
+        await api("/api/select", "POST", { addr: selected });
         await api("/api/finish", "POST", {});
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         msg.className = "msg ok";
@@ -268,6 +274,11 @@
       try {
         const st = await api("/api/status");
         if (st.wakeAddr) $("subtitle").textContent = "Currently bound: " + st.wakeAddr;
+        if (st.needsHost !== undefined) needsHost = !!st.needsHost;
+        if (st.mode) mode = st.mode;
+        if (!needsHost) {
+          $("dev-sub").textContent = "Turn on your controller in BLE mode so it appears below.";
+        }
         initPassScreen(st.passwordSet);
       } catch (e) {
         $("subtitle").textContent = "Cannot reach device: " + e.message;

@@ -1,32 +1,38 @@
 # BC250 ESP32 Power Switch
 
-An ESP32 (ESP32-WROOM) power controller for an AMD **BC250** board running as a desktop. The
+An ESP32 power controller for an AMD **BC250** board running as a desktop. The
 BC250 is fed from a PCI-E connector and has no ATX power button, so this firmware
 drives the SFX PSU's `PS_ON#` line and senses board power, giving you a real power
-button — plus optional "turn on when I pick up my controller" via classic Bluetooth.
+button — plus optional "turn on when I pick up my controller" via Bluetooth.
+
+Supports multiple targets from the same repository:
+- **ESP32-WROOM (DevKitC)**: Classic Bluetooth (BR/EDR) controller wake.
+- **AI-Thinker ESP32-CAM**: Classic Bluetooth wake with onboard flash LED wake indicator.
+- **ESP32-C3 (DevKitM-1)**: Bluetooth Low Energy (BLE) controller wake.
 
 ## Features
 
 - **Push-button power**: tap to turn on; hold 5 s while running to force off.
 - **Follows the board**: if the OS shuts the board down, the PSU is cut automatically.
 - **Boot watchdog**: if the board doesn't come up within 10 s, the PSU is released.
-- **Bluetooth controller wake** (optional, classic BR/EDR — not BLE): when a bound
-  controller (e.g. an 8BitDo) powers on, the machine powers on with it.
+- **Bluetooth controller wake** (optional):
+  - **Classic Bluetooth (BR/EDR)** on ESP32 / ESP32-CAM (PS4/PS5, Xbox, Switch Pro, 8BitDo in Classic mode).
+  - **BLE advertisement wake** on ESP32-C3 (controllers operating in BLE mode).
 - **WiFi setup portal**: configure the bound controller from a phone — no reflashing.
 
 ## Wiring
 
 The ESP32 is permanently powered from the ATX connector's **5 V standby** (into the
-DevKitC `5V` pin), so it runs whether the machine is on or off. Share a common ground
+`5V` / VIN pin), so it runs whether the machine is on or off. Share a common ground
 between the ESP, the PSU, and the board.
 
-| ESP32 (DevKitC) | ESP32-CAM | Connects to | Notes |
-|-----------------|-----------|-------------|-------|
-| GPIO25 | GPIO15 | Momentary switch, terminal A | Read with internal pull-up |
-| GPIO26 | GND (header) | Momentary switch, terminal B | DevKitC drives 26 LOW; CAM wires directly to GND |
-| GPIO32 | GPIO14 | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
-| GPIO34 | GPIO13 | BC250 `TPMS1` (pin 9) | ~3.3 V when the board is up, 0 when off (ADC voltage) |
-| 5V / GND | 5V / GND | PSU standby + common ground | Permanent power for the ESP |
+| ESP32 (DevKitC) | ESP32-CAM | ESP32-C3 | Connects to | Notes |
+|-----------------|-----------|----------|-------------|-------|
+| GPIO25 | GPIO15 | GPIO5 | Momentary switch, terminal A | Read with internal pull-up |
+| GPIO26 | GND (header) | GPIO6 | Momentary switch, terminal B | DevKitC/C3 drives LOW; CAM wires directly to GND |
+| GPIO32 | GPIO14 | GPIO4 | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
+| GPIO34 | GPIO13 | GPIO3 | BC250 `TPMS1` (pin 9) | ~3.3 V when the board is up, 0 when off (ADC voltage) |
+| 5V / GND | 5V / GND | 5V / GND | PSU standby + common ground | Permanent power for the ESP |
 
 > **`PS_ON#` is 5 V.** It idles at ~5 V (pulled up inside the PSU), above the ESP32's
 > GPIO maximum (~3.6 V). Open-drain keeps the ESP from *driving* 5 V, but the pin still
@@ -95,25 +101,29 @@ Hold the button ≥ 8 s while off (or on first use) to start the portal:
 PlatformIO (pioarduino). Two steps — firmware and the portal's web UI (a single
 `app/index.html` packed into SPIFFS).
 
-**ESP32-DevKitC (`esp32dev`, default):**
+**ESP32-DevKitC (`esp32dev`, default — Classic BT wake):**
 ```bash
 pio run -e esp32dev -t upload     # firmware
 pio run -e esp32dev -t uploadfs   # web UI filesystem
 ```
 
-**AI-Thinker ESP32-CAM (`esp32cam`):**
+**AI-Thinker ESP32-CAM (`esp32cam` — Classic BT wake):**
 ```bash
 pio run -e esp32cam -t upload     # firmware
 pio run -e esp32cam -t uploadfs   # web UI filesystem
 ```
 > *ESP32-CAM flashing note*: Use a USB-to-UART adapter (or ESP32-CAM-MB base board). Connect **GPIO0 to GND** before powering on to enter download mode; disconnect GPIO0 and reset to run.
 
+**ESP32-C3 DevKitM-1 (`esp32-c3-devkitm-1` — BLE wake):**
+```bash
+pio run -e esp32-c3-devkitm-1 -t upload     # firmware
+pio run -e esp32-c3-devkitm-1 -t uploadfs   # web UI filesystem
+```
+
 ## Notes
 
-- **Migrating from the ESP32-C3 build**: the C3 has no classic Bluetooth, so it's no
-  longer supported. A one-time `pio run -t erase` before flashing clears the old
-  settings; the portal then asks for the new adapter MAC.
+- **Multi-target support**: Switching between Classic Bluetooth (ESP32 / ESP32-CAM) and BLE (ESP32-C3) is done by choosing the PlatformIO environment target (`-e esp32dev`, `-e esp32cam`, or `-e esp32-c3-devkitm-1`).
 - **WiFi TX power** for the portal's SoftAP is `AP_TX_POWER` in
-  [include/board.h](include/board.h).
+  [include/board.h](include/board.h) (lowered automatically on ESP32-C3 to prevent the mini RF bug).
 - Serial debug runs at **115200** baud.
 - Pin assignments and all timing constants live in [include/board.h](include/board.h).

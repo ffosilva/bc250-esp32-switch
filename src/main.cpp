@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "bt_classic.h"
+#include "wake.h"
 #include "board.h"
 #include "config.h"
 #include "portal.h"
@@ -18,11 +18,9 @@
 //   * If the board shuts itself down (e.g. OS shutdown), TPMS1 drops to 0 while
 //     the PSU is still energized. We detect that and release PS_ON# so the PSU
 //     follows the board down.
-//   * While OFF, the ESP32 impersonates the BC250's Bluetooth adapter. A paired
-//     Classic BT controller that powers on pages its host; the page is rejected
-//     (pairing untouched) but counts as "controller present", which wakes the
-//     machine just like a button tap. The radio is silent while BOOTING/ON so the
-//     real adapter answers the controller.
+//   * While OFF, the ESP watches for the bound controller (Classic BT page or BLE
+//     advertisement). Detecting it counts as "controller present", which wakes the
+//     machine just like a button tap.
 
 enum PowerState {
   STATE_OFF,      // PSU released, board down
@@ -46,11 +44,9 @@ static bool          boardSenseStable  = false;  // debounced TPMS1 HIGH
 static bool          boardSenseLastRaw = false;
 static unsigned long boardSenseChange  = 0;
 
-// --- Bluetooth wake ---
-// Presence is recorded by the BT controller task (see bt_classic.cpp) and read
-// from loop() via btWakeSeen().
-static bool          btWakeActive    = false;  // host + controller MACs configured
-static unsigned long btInhibitUntil  = 0;      // wakes ignored until this
+// --- Wake subsystem ---
+static bool          wakeActive        = false;
+static unsigned long wakeInhibitUntil  = 0;      // wakes ignored until this
 
 // --- Misc timers ---
 static unsigned long bootStart    = 0;
@@ -69,8 +65,8 @@ static void setState(PowerState next) {
   if (next == state) return;
   Serial.printf("[STATE] %s -> %s\n", stateName(state), stateName(next));
   state = next;
-  // Only answer controller pages while the machine is down.
-  if (btWakeActive) btSetConnectable(next == STATE_OFF);
+  // Only watch for wake while the machine is down.
+  if (wakeActive) wakeSetConnectable(next == STATE_OFF);
 }
 
 #if defined(BOARD_ESP32CAM)
@@ -107,8 +103,13 @@ static bool senseLevel = false;
 // calibration (vref) that many modules never had burned; without it every read
 // fails and returns 0. Use the raw 12-bit count instead: the ADC1 + 11 dB range is
 // roughly 0..3.3 V, which is accurate enough for the wide hysteresis thresholds.
+// On ESP32-C3, analogReadMilliVolts() is factory-calibrated in eFuse.
 static uint32_t senseReadMv() {
+#if defined(BOARD_ESP32C3)
+  return analogReadMilliVolts(BOARD_SENSE);
+#else
   return (uint32_t)analogRead(BOARD_SENSE) * 3300UL / 4095UL;
+#endif
 }
 
 static bool readBoardSense(uint32_t *outMv = nullptr) {
@@ -140,7 +141,7 @@ static void psuOff() {
   Serial.println("[PSU ] PS_ON# released (high-Z) -> PSU OFF");
 }
 
-// Shared power-on path, used by both the button and the Bluetooth wake. Takes the
+// Shared power-on path, used by both the button and the wake driver. Takes the
 // loop's `now` rather than calling millis() itself: the BOOTING timeout compares
 // against the `now` cached at the top of normalLoop(), and a fresh millis() here
 // can land a millisecond past it. Since the comparison is unsigned, bootStart >
@@ -153,7 +154,7 @@ static void powerOn(const char *reason, unsigned long now) {
   setState(STATE_BOOTING);
 }
 
-// Shared power-off path. Starts the BT-wake cooldown so the controller's
+// Shared power-off path. Starts the wake cooldown so the controller's
 // post-shutdown reconnect burst can't immediately wake us again. Takes `now` for
 // the same single-clock-per-loop reason as powerOn().
 static void powerOff(const char *reason, unsigned long now) {
@@ -163,25 +164,15 @@ static void powerOff(const char *reason, unsigned long now) {
   digitalWrite(FLASH_LED, LOW);
   flashUntil = 0;
 #endif
-  btInhibitUntil = now + BT_WAKE_COOLDOWN_MS;
+  wakeInhibitUntil = now + WAKE_WAKE_COOLDOWN_MS;
   setState(STATE_OFF);
 }
 
-static void startBtWake() {
-  if (config.wakeAddr.isEmpty() || config.hostAddr.isEmpty()) {
-    Serial.println("[BT  ] controller/host not configured; BT wake disabled "
-                   "(hold button 8s while OFF to configure)");
-    return;
+static void startWake() {
+  wakeActive = wakeBegin();
+  if (wakeActive) {
+    wakeSetConnectable(state == STATE_OFF);
   }
-  if (!btBegin(config.hostAddr)) {
-    Serial.println("[BT  ] init failed; BT wake disabled");
-    return;
-  }
-  btSetWakeAddr(config.wakeAddr);
-  btWakeActive = true;
-  btSetConnectable(state == STATE_OFF);
-  Serial.printf("[BT  ] waiting for controller %s (as host %s)\n",
-                config.wakeAddr.c_str(), config.hostAddr.c_str());
 }
 
 // Persist a setup request and reboot into the WiFi portal.
@@ -226,6 +217,8 @@ static void normalBegin() {
   pinMode(FLASH_LED, OUTPUT);
   digitalWrite(FLASH_LED, LOW);
   pinMode(BOARD_SENSE, INPUT_PULLDOWN);
+#elif defined(BOARD_ESP32C3)
+  analogSetPinAttenuation(BOARD_SENSE, ADC_11db);
 #else
   // TPMS1 sense: read as ADC over the full 0-3.3V range.
   analogSetAttenuation(ADC_11db);  // global; the per-pin call errors before the first read
@@ -242,11 +235,12 @@ static void normalBegin() {
     setState(STATE_ON);
   }
 
-  Serial.printf("[INIT] state=%s board=%s bound=%s\n",
+  Serial.printf("[INIT] state=%s board=%s bound=%s mode=%s\n",
                 stateName(state), boardSenseStable ? "UP" : "DOWN",
-                config.wakeAddr.isEmpty() ? "(none)" : config.wakeAddr.c_str());
+                config.wakeAddr.isEmpty() ? "(none)" : config.wakeAddr.c_str(),
+                wakeModeName());
 
-  startBtWake();
+  startWake();
 }
 
 static bool g_setupMode = false;
@@ -328,20 +322,16 @@ static void normalLoop() {
     powerOff("long press (>5s) while ON", now);
   }
 
-  // --- Bluetooth controller wake ("machine follows controller") ---
-  // While OFF, the controller paging us powers the machine on. The guard
-  // window after a power-off lets you switch the controller off first (so it
-  // goes absent and the machine stays down) and rides out the controller's
-  // reconnect burst at shutdown.
-  btLoop();
-  unsigned long btLast = 0;
-  bool btPresent = btWakeSeen(&btLast) && (now - btLast) < BT_PRESENCE_TIMEOUT_MS;
-  bool btInhibited = (int32_t)(btInhibitUntil - now) > 0;
-  if (state == STATE_OFF && btPresent && !btInhibited) {
+  // --- Controller wake ("machine follows controller") ---
+  wakeLoop();
+  unsigned long wakeLast = 0;
+  bool wakePresent = wakeSeen(&wakeLast) && (now - wakeLast) < WAKE_PRESENCE_TIMEOUT_MS;
+  bool wakeInhibited = (int32_t)(wakeInhibitUntil - now) > 0;
+  if (state == STATE_OFF && wakePresent && !wakeInhibited) {
 #if defined(BOARD_ESP32CAM)
     triggerFlash();
 #endif
-    powerOn("controller present (BT)", now);
+    powerOn("controller present", now);
   }
 
   bool boardChanged = debounce(boardRaw, &boardSenseStable, &boardSenseLastRaw,
@@ -375,11 +365,11 @@ static void normalLoop() {
   // --- Heartbeat ---
   if (now - lastHeartbeat >= HEARTBEAT_MS) {
     lastHeartbeat = now;
-    Serial.printf("[HB  ] state=%s board=%s btn=%s bt=%s | sense: %umV (%s)\n",
+    Serial.printf("[HB  ] state=%s board=%s btn=%s wake=%s | sense: %umV (%s)\n",
                   stateName(state),
                   boardSenseStable ? "UP" : "DOWN",
                   buttonStable ? "down" : "up",
-                  btPresent ? "present" : "absent",
+                  wakePresent ? "present" : "absent",
                   senseMv, boardRaw ? "high" : "low");
   }
 }

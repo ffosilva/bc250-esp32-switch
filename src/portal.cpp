@@ -11,7 +11,7 @@
 #include "mbedtls/sha256.h"
 
 #include "board.h"
-#include "bt_classic.h"
+#include "wake.h"
 #include "config.h"
 
 static const size_t MIN_PASSWORD_LEN = 6;
@@ -76,6 +76,8 @@ static void handleStatus(AsyncWebServerRequest *req) {
   doc["wakeAddr"]    = config.wakeAddr;
   doc["hostAddr"]    = config.hostAddr;
   doc["configured"]  = isConfigured();
+  doc["mode"]        = wakeModeName();
+  doc["needsHost"]   = wakeNeedsHostAddr();
   String out;
   serializeJson(doc, out);
   req->send(200, "application/json", out);
@@ -123,12 +125,12 @@ static void handleLogin(AsyncWebServerRequest *req, JsonVariant &json) {
   req->send(200, "application/json", out);
 }
 
-static void handleBtDevices(AsyncWebServerRequest *req) {
+static void handleDevices(AsyncWebServerRequest *req) {
   if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
 
   static const int MAX_OUT = 48;
-  BtDev snap[MAX_OUT];
-  int n = btSnapshotDevices(snap, MAX_OUT);
+  WakeDev snap[MAX_OUT];
+  int n = wakeSnapshotDevices(snap, MAX_OUT);
 
   JsonDocument doc;
   JsonArray arr = doc["devices"].to<JsonArray>();
@@ -151,31 +153,25 @@ static bool readMac(AsyncWebServerRequest *req, JsonVariant &json, String &addr)
   addr = o["addr"] | "";
   addr.trim();
   addr.toLowerCase();
-  if (!btValidMac(addr)) {
+  if (!wakeValidMac(addr)) {
     sendJsonError(req, 400, "invalid address");
     return false;
   }
   return true;
 }
 
-static void handleBtHost(AsyncWebServerRequest *req, JsonVariant &json) {
+static void handleHost(AsyncWebServerRequest *req, JsonVariant &json) {
   if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
   String addr;
   if (!readMac(req, json, addr)) return;
-  if (addr != config.hostAddr) {
-    setHostAddr(addr);
-    // Re-init the controller under the new identity so learn mode can see
-    // controllers that page this host.
-    if (btRestart(addr)) {
-      btSetConnectable(true);
-      btSetDiscovery(true);
-    }
+  if (wakeNeedsHostAddr()) {
+    wakeSetHostAddr(addr);
+    Serial.printf("[PORTAL] host adapter %s\n", addr.c_str());
   }
-  Serial.printf("[PORTAL] host adapter %s\n", addr.c_str());
   req->send(200, "application/json", "{\"ok\":true}");
 }
 
-static void handleBtSelect(AsyncWebServerRequest *req, JsonVariant &json) {
+static void handleSelect(AsyncWebServerRequest *req, JsonVariant &json) {
   if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
   String addr;
   if (!readMac(req, json, addr)) return;
@@ -220,24 +216,21 @@ void portalBegin() {
   dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
   dnsServer.start(53, "*", WiFi.softAPIP());
 
-  // Bluetooth discovery for the picker. Inquiry runs at a low duty cycle
-  // (BT_INQUIRY_MS on / BT_IDLE_MS off) so the SoftAP keeps its airtime. If the
-  // host MAC is already known we also answer pages (learn mode): turning on a
-  // controller that's paired to the BC250 makes it show up here.
-  if (!config.hostAddr.isEmpty()) {
-    if (btBegin(config.hostAddr)) {
-      btSetConnectable(true);
-      btSetDiscovery(true);
-    }
-  }
+  // Start device discovery for the picker
+  wakeSetDiscovery(true);
 
   server.on("/api/status", HTTP_GET, handleStatus);
-  server.on("/api/bt/devices", HTTP_GET, handleBtDevices);
+  server.on("/api/devices", HTTP_GET, handleDevices);
+  server.on("/api/bt/devices", HTTP_GET, handleDevices);
+  server.on("/api/ble/devices", HTTP_GET, handleDevices);
   server.on("/api/finish", HTTP_POST, handleFinish);
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/password", handlePassword));
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/login", handleLogin));
-  server.addHandler(new AsyncCallbackJsonWebHandler("/api/bt/host", handleBtHost));
-  server.addHandler(new AsyncCallbackJsonWebHandler("/api/bt/select", handleBtSelect));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/host", handleHost));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/bt/host", handleHost));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/select", handleSelect));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/bt/select", handleSelect));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/ble/select", handleSelect));
 
   server.on("/", HTTP_GET, serveIndex);
   server.onNotFound([](AsyncWebServerRequest *req) {
@@ -254,7 +247,7 @@ void portalBegin() {
 
 void portalLoop() {
   dnsServer.processNextRequest();
-  btLoop();
+  wakeLoop();
 
   // Button held in setup mode = escape back to normal mode (only useful once
   // configured; an unconfigured device just re-enters setup).

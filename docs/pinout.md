@@ -1,21 +1,24 @@
-# Pinout & wiring (ESP32-DevKitC & AI-Thinker ESP32-CAM)
+# Pinout & wiring (ESP32-DevKitC, AI-Thinker ESP32-CAM, ESP32-C3)
 
-Wiring reference for the BC250 power switch on an **ESP32-DevKitC (38-pin, ESP32-WROOM-32)**
-or an **AI-Thinker ESP32-CAM (ESP-32S module)**.
+Wiring reference for the BC250 power switch on:
+- **ESP32-DevKitC (38-pin, ESP32-WROOM-32)**: Classic Bluetooth wake
+- **AI-Thinker ESP32-CAM (ESP-32S module)**: Classic Bluetooth wake
+- **ESP32-C3 (DevKitM-1)**: Bluetooth Low Energy (BLE) wake
+
 Pin numbers live in [include/board.h](../include/board.h) — conditionally selected by the
-active PlatformIO environment (`esp32dev` vs `esp32cam`).
+active PlatformIO environment (`esp32dev`, `esp32cam`, or `esp32-c3-devkitm-1`).
 
 ## GPIO assignment
 
-| Signal | DevKitC | ESP32-CAM | Connects to | Notes |
-|--------|---------|-----------|-------------|-------|
-| `BUTTON_SENSE` | **GPIO25** | **GPIO15** | Momentary switch, terminal A | Internal pull-up; pressed reads LOW |
-| `BUTTON_GND` | **GPIO26** | **GND** | Momentary switch, terminal B | DevKitC drives 26 LOW; CAM wires to header GND |
-| `PS_ON_PIN` | **GPIO32** | **GPIO14** | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
-| `BOARD_SENSE` | **GPIO34** | **GPIO13** | BC250 `TPMS1` pin 9 | ~3.3 V when up, 0 when off (DevKitC: ADC with hysteresis; CAM: digital INPUT_PULLDOWN) |
-| `FLASH_LED` | — | **GPIO4** | Onboard white LED | Flashes 500 ms when controller wakes the PC |
-| `5V` / `VIN` | **5V** | **5V** | PSU `+5VSB` | Permanent power for the ESP |
-| `GND` | **GND** | **GND** | PSU GND + board GND | Common ground |
+| Signal | DevKitC | ESP32-CAM | ESP32-C3 | Connects to | Notes |
+|--------|---------|-----------|----------|-------------|-------|
+| `BUTTON_SENSE` | **GPIO25** | **GPIO15** | **GPIO5** | Momentary switch, terminal A | Internal pull-up; pressed reads LOW |
+| `BUTTON_GND` | **GPIO26** | **GND** | **GPIO6** | Momentary switch, terminal B | DevKitC/C3 drives LOW; CAM wires to header GND |
+| `PS_ON_PIN` | **GPIO32** | **GPIO14** | **GPIO4** | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
+| `BOARD_SENSE` | **GPIO34** | **GPIO13** | **GPIO3** | BC250 `TPMS1` pin 9 | ~3.3 V when up, 0 when off (DevKitC/C3: ADC with hysteresis; CAM: digital INPUT_PULLDOWN) |
+| `FLASH_LED` | — | **GPIO4** | — | Onboard white LED | Flashes 500 ms when controller wakes the PC |
+| `5V` / `VIN` | **5V** | **5V** | **5V** | PSU `+5VSB` | Permanent power for the ESP |
+| `GND` | **GND** | **GND** | **GND** | PSU GND + board GND | Common ground |
 
 ### Pin rationale
 
@@ -23,6 +26,12 @@ active PlatformIO environment (`esp32dev` vs `esp32cam`).
 - **GPIO34 is ADC1** (ADC1_CH6). ADC2 can't be read while WiFi is running (setup portal), so the analog board-sense must be on ADC1. GPIO34 is input-only.
 - **GPIO32** is high-impedance at reset, so `PS_ON#` stays released (PSU off) while the ESP32 boots. Not a strapping pin.
 - **GPIO25/26** are general GPIOs with no boot-time function.
+
+**On ESP32-C3 (DevKitM-1):**
+- **GPIO3 is ADC1** (ADC1_CH3). Read as an analog voltage with factory eFuse calibration.
+- **GPIO4** is open-drain for `PS_ON#`.
+- **GPIO5/6** connect to the momentary switch.
+- USB-CDC is built-in (`ARDUINO_USB_MODE=1`, `ARDUINO_USB_CDC_ON_BOOT=1`).
 
 **On AI-Thinker ESP32-CAM:**
 - Almost all GPIOs are taken by the camera, SD card socket, flash LED, and PSRAM.
