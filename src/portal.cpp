@@ -78,6 +78,12 @@ static void handleStatus(AsyncWebServerRequest *req) {
   doc["configured"]  = isConfigured();
   doc["mode"]        = wakeModeName();
   doc["needsHost"]   = wakeNeedsHostAddr();
+#if defined(BOARD_ESP32CAM)
+  doc["isCam"]       = true;
+  doc["flashOnWake"] = config.flashOnWake;
+#else
+  doc["isCam"]       = false;
+#endif
   String out;
   serializeJson(doc, out);
   req->send(200, "application/json", out);
@@ -180,6 +186,18 @@ static void handleSelect(AsyncWebServerRequest *req, JsonVariant &json) {
   req->send(200, "application/json", "{\"ok\":true}");
 }
 
+static void handleSettings(AsyncWebServerRequest *req, JsonVariant &json) {
+  if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
+#if defined(BOARD_ESP32CAM)
+  JsonObject o = json.as<JsonObject>();
+  if (o["flashOnWake"].is<bool>()) {
+    setFlashOnWake(o["flashOnWake"].as<bool>());
+    Serial.printf("[PORTAL] flashOnWake=%d\n", config.flashOnWake ? 1 : 0);
+  }
+#endif
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
 static void handleFinish(AsyncWebServerRequest *req) {
   if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
   if (!isConfigured()) { sendJsonError(req, 400, "not fully configured"); return; }
@@ -231,6 +249,7 @@ void portalBegin() {
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/select", handleSelect));
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/bt/select", handleSelect));
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/ble/select", handleSelect));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/settings", handleSettings));
 
   server.on("/", HTTP_GET, serveIndex);
   server.onNotFound([](AsyncWebServerRequest *req) {

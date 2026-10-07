@@ -329,7 +329,9 @@ static void normalLoop() {
   bool wakeInhibited = (int32_t)(wakeInhibitUntil - now) > 0;
   if (state == STATE_OFF && wakePresent && !wakeInhibited) {
 #if defined(BOARD_ESP32CAM)
-    triggerFlash();
+    if (config.flashOnWake) {
+      triggerFlash();
+    }
 #endif
     powerOn("controller present", now);
   }

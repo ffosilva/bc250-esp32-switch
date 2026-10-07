@@ -89,6 +89,17 @@
       <label for="manual">Or enter a MAC manually</label>
       <input id="manual" placeholder="aa:bb:cc:dd:ee:ff" />
 
+      <!-- ESP32-CAM Flash LED wake option (hidden on other boards) -->
+      <div id="cam-options" class="hidden" style="margin-top:16px;padding-top:14px;border-top:1px solid #333">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--fg);margin:0">
+          <input type="checkbox" id="flash-on-wake" style="width:18px;height:18px;margin:0;cursor:pointer;accent-color:var(--accent)" />
+          <span>Blink flash LED on Bluetooth wake</span>
+        </label>
+        <div class="help" style="margin-top:6px;font-size:11px">
+          Blinks the onboard white LED once (500 ms) when the machine is woken up by your controller.
+        </div>
+      </div>
+
       <button id="save-btn" disabled>Bind controller &amp; finish</button>
       <div class="msg" id="dev-msg"></div>
     </div>
@@ -100,6 +111,7 @@
     let pollTimer = null;
     let needsHost = true;
     let mode = "classic";
+    let isCam = false;
 
     const $ = (id) => document.getElementById(id);
 
@@ -251,11 +263,20 @@
       });
     }
 
+    $("flash-on-wake").onchange = async () => {
+      try {
+        await api("/api/settings", "POST", { flashOnWake: $("flash-on-wake").checked });
+      } catch (e) { /* ignore */ }
+    };
+
     $("save-btn").onclick = async () => {
       const msg = $("dev-msg");
       msg.className = "msg";
       try {
         $("save-btn").disabled = true;
+        if (isCam) {
+          await api("/api/settings", "POST", { flashOnWake: $("flash-on-wake").checked });
+        }
         await api("/api/select", "POST", { addr: selected });
         await api("/api/finish", "POST", {});
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
@@ -278,6 +299,11 @@
         if (st.mode) mode = st.mode;
         if (!needsHost) {
           $("dev-sub").textContent = "Turn on your controller in BLE mode so it appears below.";
+        }
+        isCam = !!st.isCam;
+        if (isCam) {
+          $("cam-options").classList.remove("hidden");
+          $("flash-on-wake").checked = st.flashOnWake !== false;
         }
         initPassScreen(st.passwordSet);
       } catch (e) {

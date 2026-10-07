@@ -1,17 +1,18 @@
 #include "config.h"
 #include <Preferences.h>
 
-Config config{"", "", "", false};
+Config config{"", "", "", false, true};
 
 static Preferences prefs;
 static const char *NS = "bc250";
 
 void loadConfig() {
   prefs.begin(NS, true);  // read-only
-  config.wakeAddr   = prefs.getString("wakeAddr", "");
-  config.hostAddr   = prefs.getString("hostAddr", "");
-  config.passHash   = prefs.getString("passHash", "");
-  config.forceSetup = prefs.getBool("forceSetup", false);
+  config.wakeAddr    = prefs.getString("wakeAddr", "");
+  config.hostAddr    = prefs.getString("hostAddr", "");
+  config.passHash    = prefs.getString("passHash", "");
+  config.forceSetup  = prefs.getBool("forceSetup", false);
+  config.flashOnWake = prefs.getBool("flashOnWake", true);
   prefs.end();
 }
 
@@ -40,6 +41,13 @@ void setForceSetup(bool force) {
   config.forceSetup = force;
   prefs.begin(NS, false);
   prefs.putBool("forceSetup", force);
+  prefs.end();
+}
+
+void setFlashOnWake(bool enable) {
+  config.flashOnWake = enable;
+  prefs.begin(NS, false);
+  prefs.putBool("flashOnWake", enable);
   prefs.end();
 }
 

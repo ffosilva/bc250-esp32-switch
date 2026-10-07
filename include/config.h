@@ -12,6 +12,7 @@ struct Config {
   String hostAddr;
   String passHash;
   bool   forceSetup;
+  bool   flashOnWake;
 };
 
 extern Config config;
@@ -22,6 +23,7 @@ void setWakeAddr(const String &addr);
 void setHostAddr(const String &addr);
 void setPassHash(const String &hash);
 void setForceSetup(bool force);
+void setFlashOnWake(bool enable);
 
 // Fully provisioned: a password and controller are set (plus host adapter if Classic BT).
 bool isConfigured();

@@ -16,7 +16,7 @@ active PlatformIO environment (`esp32dev`, `esp32cam`, or `esp32-c3-devkitm-1`).
 | `BUTTON_GND` | **GPIO26** | **GND** | **GPIO6** | Momentary switch, terminal B | DevKitC/C3 drives LOW; CAM wires to header GND |
 | `PS_ON_PIN` | **GPIO32** | **GPIO14** | **GPIO4** | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
 | `BOARD_SENSE` | **GPIO34** | **GPIO13** | **GPIO3** | BC250 `TPMS1` pin 9 | ~3.3 V when up, 0 when off (DevKitC/C3: ADC with hysteresis; CAM: digital INPUT_PULLDOWN) |
-| `FLASH_LED` | — | **GPIO4** | — | Onboard white LED | Flashes 500 ms when controller wakes the PC |
+| `FLASH_LED` | — | **GPIO4** | — | Onboard white LED | Flashes 500 ms when controller wakes the PC (configurable in portal) |
 | `5V` / `VIN` | **5V** | **5V** | **5V** | PSU `+5VSB` | Permanent power for the ESP |
 | `GND` | **GND** | **GND** | **GND** | PSU GND + board GND | Common ground |
 
@@ -38,7 +38,7 @@ active PlatformIO environment (`esp32dev`, `esp32cam`, or `esp32-c3-devkitm-1`).
 - **GPIO13** is used for `BOARD_SENSE` as a digital input with internal pull-down (`INPUT_PULLDOWN`). All ADC1 pins (GPIO32–39) are internally dedicated to the camera or red LED. ADC2 cannot be sampled when Bluetooth or WiFi is active, and GPIO13 is shared with the SD DAT3 line which floats HIGH unless pulled down.
 - **GPIO14** is free from strapping functions and used as open-drain for `PS_ON#`.
 - **GPIO15** has an internal pull-up and is used for `BUTTON_SENSE`. Terminal B connects directly to the header `GND` pin (saving a GPIO pin).
-- **GPIO4** drives the onboard high-power white LED (500 ms indicator pulse when controller wake is triggered).
+- **GPIO4** drives the onboard high-power white LED (500 ms indicator pulse when controller wake is triggered; can be toggled via setup portal).
 - **Pins avoided on ESP32-CAM**:
   - `GPIO12`: Strapping pin MTDI (if pulled HIGH at boot by 3.3 V TPMS1, sets flash VDD to 1.8 V and prevents boot).
   - `GPIO16`: Connected to the external PSRAM chip CS line.
