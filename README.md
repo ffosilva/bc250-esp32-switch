@@ -8,7 +8,7 @@ button — plus optional "turn on when I pick up my controller" via Bluetooth.
 Supports multiple targets from the same repository:
 - **ESP32-WROOM (DevKitC)**: Classic Bluetooth (BR/EDR) controller wake.
 - **AI-Thinker ESP32-CAM**: Classic Bluetooth wake with onboard flash LED wake indicator.
-- **ESP32-C3 (DevKitM-1)**: Bluetooth Low Energy (BLE) controller wake.
+- **ESP32-C3 (SuperMini / DevKitM-1)**: Bluetooth Low Energy (BLE) controller wake.
 
 ## Features
 
@@ -42,7 +42,7 @@ between the ESP, the PSU, and the board.
 `TPMS1` is a higher-impedance signal that hovers near the logic threshold, so it's read
 as an analog voltage with hysteresis rather than a digital pin (ADC1 on DevKitC and ESP32-C3; digital input with pull-down on ESP32-CAM).
 
-**Full pinout, header diagrams for DevKitC, ESP32-CAM, and ESP32-C3, ATX 24-pin and TPMS1 connector diagrams, and the
+**Full pinout, header diagrams for DevKitC, ESP32-CAM, and ESP32-C3 (SuperMini & DevKitM-1), ATX 24-pin and TPMS1 connector diagrams, and the
 `PS_ON#` buffer circuit: [docs/pinout.md](docs/pinout.md).**
 
 ## Button controls

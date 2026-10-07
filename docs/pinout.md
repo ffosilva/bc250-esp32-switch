@@ -3,7 +3,7 @@
 Wiring reference for the BC250 power switch on:
 - **ESP32-DevKitC (38-pin, ESP32-WROOM-32)**: Classic Bluetooth wake
 - **AI-Thinker ESP32-CAM (ESP-32S module)**: Classic Bluetooth wake
-- **ESP32-C3 (DevKitM-1)**: Bluetooth Low Energy (BLE) wake
+- **ESP32-C3 (SuperMini / DevKitM-1)**: Bluetooth Low Energy (BLE) wake
 
 Pin numbers live in [include/board.h](../include/board.h) — conditionally selected by the
 active PlatformIO environment (`esp32dev`, `esp32cam`, or `esp32-c3-devkitm-1`).
@@ -27,7 +27,7 @@ active PlatformIO environment (`esp32dev`, `esp32cam`, or `esp32-c3-devkitm-1`).
 - **GPIO32** is high-impedance at reset, so `PS_ON#` stays released (PSU off) while the ESP32 boots. Not a strapping pin.
 - **GPIO25/26** are general GPIOs with no boot-time function.
 
-**On ESP32-C3 (DevKitM-1):**
+**On ESP32-C3 (SuperMini / DevKitM-1):**
 - **GPIO3 is ADC1** (ADC1_CH3). Read as an analog voltage with factory eFuse calibration.
 - **GPIO4** is open-drain for `PS_ON#`.
 - **GPIO5/6** connect to the momentary switch.
@@ -96,11 +96,32 @@ The ESP32-CAM has two 8-pin headers (antenna at top):
          └─────────────────────────┘
 ```
 
-## ESP32-C3 (DevKitM-1) header
+## ESP32-C3 SuperMini header (USB-C)
+
+![ESP32-C3 SuperMini Pinout](images/esp32-c3-supermini-pinout.png)
+
+The ultra-compact ESP32-C3 SuperMini board features a built-in USB-C port and two 8-pin headers (USB-C at top):
+
+```
+           ┌────────────────────────┐
+           │       [ USB-C ]        │
+           │                        │
+     IO5   │ ◄─ switch A (pull-up)  │ 5V   ◄─ PSU +5VSB
+     IO6   │ ──► switch B (driven L)│ GND  ◄─ common ground
+     IO7   │                        │ 3V3
+     IO8   │ (blue LED)             │ IO4  ──► PS_ON# (open-drain)
+     IO9   │ (BOOT button)          │ IO3  ◄─ TPMS1 pin 9 (ADC1)
+    IO10   │                        │ IO2
+    IO20   │                        │ IO1
+    IO21   │                        │ IO0
+           └────────────────────────┘
+```
+
+## ESP32-C3 DevKitM-1 header
 
 ![ESP32-C3-DevKitM-1 Pinout](images/esp32-c3-devkitm-1-pinout.png)
 
-The ESP32-C3-DevKitM-1 has two 15-pin headers (antenna at top, USB at bottom):
+The ESP32-C3-DevKitM-1 development board has two 15-pin headers (antenna at top, USB at bottom):
 
 ```
            ┌─────────────────────────────┐
@@ -124,9 +145,6 @@ IO3 (ADC1) │ ◄─ TPMS1 pin 9              │ IO9  (BOOT)
            │          [ USB ]            │
            └─────────────────────────────┘
 ```
-
-> **Note on ESP32-C3 SuperMini:** If using an ESP32-C3 SuperMini board, the same GPIO numbers
-> apply (`GPIO3`, `GPIO4`, `GPIO5`, `GPIO6`), but check the board's silkscreen labels for physical pin positions.
 
 ## Connections
 
