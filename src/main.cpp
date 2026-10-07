@@ -82,6 +82,22 @@ static bool readBoardSense(uint32_t *outMv = nullptr) {
   if (outMv) *outMv = high ? 3300 : 0;
   return high;
 }
+
+// Flash LED indicator pulse tracking (GPIO 4)
+static unsigned long flashUntil = 0;
+
+static void triggerFlash(unsigned long durationMs = FLASH_DURATION_MS) {
+  digitalWrite(FLASH_LED, HIGH);
+  flashUntil = millis() + durationMs;
+  Serial.println("[LED ] Flash LED ON (controller wake pulse)");
+}
+
+static void updateFlash(unsigned long now) {
+  if (flashUntil && (long)(now - flashUntil) >= 0) {
+    digitalWrite(FLASH_LED, LOW);
+    flashUntil = 0;
+  }
+}
 #else
 // Raw (pre-time-debounce) board-up level, derived from the TPMS1 voltage with
 // hysteresis so a signal hovering near the logic threshold doesn't chatter.
@@ -143,6 +159,10 @@ static void powerOn(const char *reason, unsigned long now) {
 static void powerOff(const char *reason, unsigned long now) {
   Serial.printf("[ACT ] %s -> powering off\n", reason);
   psuOff();
+#if defined(BOARD_ESP32CAM)
+  digitalWrite(FLASH_LED, LOW);
+  flashUntil = 0;
+#endif
   btInhibitUntil = now + BT_WAKE_COOLDOWN_MS;
   setState(STATE_OFF);
 }
@@ -203,6 +223,8 @@ static void normalBegin() {
   pinMode(BUTTON_SENSE, INPUT_PULLUP);
 
 #if defined(BOARD_ESP32CAM)
+  pinMode(FLASH_LED, OUTPUT);
+  digitalWrite(FLASH_LED, LOW);
   pinMode(BOARD_SENSE, INPUT_PULLDOWN);
 #else
   // TPMS1 sense: read as ADC over the full 0-3.3V range.
@@ -253,6 +275,10 @@ void setup() {
 
 static void normalLoop() {
   unsigned long now = millis();
+
+#if defined(BOARD_ESP32CAM)
+  updateFlash(now);
+#endif
 
   // --- Serial commands for debugging ---
   while (Serial.available()) {
@@ -312,6 +338,9 @@ static void normalLoop() {
   bool btPresent = btWakeSeen(&btLast) && (now - btLast) < BT_PRESENCE_TIMEOUT_MS;
   bool btInhibited = (int32_t)(btInhibitUntil - now) > 0;
   if (state == STATE_OFF && btPresent && !btInhibited) {
+#if defined(BOARD_ESP32CAM)
+    triggerFlash();
+#endif
     powerOn("controller present (BT)", now);
   }
 

@@ -25,6 +25,11 @@ const int BUTTON_GND   = -1; // -1 means wired to physical GND header
 const int PS_ON_PIN    = 14;
 const int BOARD_SENSE  = 13;
 
+// Onboard white flashlight LED (GPIO 4). Pulsed as indicator when the
+// Bluetooth controller wakes the machine.
+const int FLASH_LED             = 4;
+const unsigned long FLASH_DURATION_MS = 500;
+
 #else
 // Standard ESP32-WROOM (DevKitC) wiring:
 //
