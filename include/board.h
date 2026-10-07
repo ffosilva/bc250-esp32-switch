@@ -2,7 +2,30 @@
 
 //*******  Pin definitions  ***************
 //
-// BC250 PSU controller wiring:
+#if defined(BOARD_ESP32CAM)
+// AI-Thinker ESP32-CAM (ESP-32S module) wiring:
+//
+//   ESP32-CAM Header              External
+//   ----------------              --------
+//   GPIO15 (BUTTON_SENSE)  <-----> momentary switch terminal A
+//   GND                    <-----> momentary switch terminal B
+//   GPIO14 (PS_ON_PIN)     <-----> ATX PS_ON# (green wire, active LOW)
+//   GPIO13 (BOARD_SENSE)   <-----> BC250 TPMS1 pin 9 (ADC2_CH4)
+//
+// The ESP32-CAM dedicates most pins to the camera, flash LED, and SD card.
+// Switch terminal B is wired directly to header GND (BUTTON_GND = -1).
+// GPIO12 is intentionally avoided because it is strapping pin MTDI (pulling it
+// HIGH at boot sets flash VDD to 1.8V and bricks boot).
+// GPIO13 is ADC2_CH4. ADC2 cannot be sampled while WiFi is running; however,
+// board sense is only required during normal operation (WiFi is off).
+const int BUTTON_SENSE = 15;
+const int BUTTON_GND   = -1; // -1 means wired to physical GND header
+
+const int PS_ON_PIN    = 14;
+const int BOARD_SENSE  = 13; // ADC2_CH4
+
+#else
+// Standard ESP32-WROOM (DevKitC) wiring:
 //
 //   ESP32-WROOM (DevKitC)         External
 //   ---------------------         --------
@@ -26,9 +49,10 @@ const int PS_ON_PIN = 32;
 // off. In practice it's a higher-impedance source that settles near ~2.9V and
 // hovers close to the ESP's digital logic threshold, so digitalRead() flickers.
 // We read it as an ADC voltage with hysteresis instead (see thresholds below).
-// GPIO34 is ADC1_CH6 (input-only). It must be an ADC1 pin: ADC2 is unusable
-// while WiFi is running (setup portal).
+// GPIO34 is ADC1_CH6 (input-only). It must be an ADC1 pin on DevKitC: ADC2 is
+// unusable while WiFi is running (setup portal).
 const int BOARD_SENSE = 34;
+#endif
 
 // Hysteresis thresholds for the analog board-sense reading. The gap between
 // them keeps a noisy signal sitting near the threshold from chattering:

@@ -20,13 +20,13 @@ The ESP32 is permanently powered from the ATX connector's **5 V standby** (into 
 DevKitC `5V` pin), so it runs whether the machine is on or off. Share a common ground
 between the ESP, the PSU, and the board.
 
-| ESP32 (DevKitC) | Connects to | Notes |
-|-----------------|-------------|-------|
-| GPIO25 | Momentary switch, terminal A | Read with internal pull-up |
-| GPIO26 | Momentary switch, terminal B | Driven LOW as the switch's ground |
-| GPIO32 | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
-| GPIO34 | BC250 `TPMS1` (pin 9) | ~3.3 V when the board is up, 0 when off (ADC1, input-only) |
-| 5V / GND | PSU standby + common ground | Permanent power for the ESP |
+| ESP32 (DevKitC) | ESP32-CAM | Connects to | Notes |
+|-----------------|-----------|-------------|-------|
+| GPIO25 | GPIO15 | Momentary switch, terminal A | Read with internal pull-up |
+| GPIO26 | GND (header) | Momentary switch, terminal B | DevKitC drives 26 LOW; CAM wires directly to GND |
+| GPIO32 | GPIO14 | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
+| GPIO34 | GPIO13 | BC250 `TPMS1` (pin 9) | ~3.3 V when the board is up, 0 when off (ADC voltage) |
+| 5V / GND | 5V / GND | PSU standby + common ground | Permanent power for the ESP |
 
 > **`PS_ON#` is 5 V.** It idles at ~5 V (pulled up inside the PSU), above the ESP32's
 > GPIO maximum (~3.6 V). Open-drain keeps the ESP from *driving* 5 V, but the pin still
@@ -34,9 +34,9 @@ between the ESP, the PSU, and the board.
 > **recommended** — see [docs/pinout.md](docs/pinout.md#ps_on-5-v-caution-recommended-buffer).
 
 `TPMS1` is a higher-impedance signal that hovers near the logic threshold, so it's read
-as an analog voltage with hysteresis rather than a digital pin.
+as an analog voltage with hysteresis rather than a digital pin (ADC1 on DevKitC, ADC2_CH4 on CAM).
 
-**Full pinout, DevKitC header diagram, ATX 24-pin and TPMS1 connector diagrams, and the
+**Full pinout, header diagrams for DevKitC and ESP32-CAM, ATX 24-pin and TPMS1 connector diagrams, and the
 `PS_ON#` buffer circuit: [docs/pinout.md](docs/pinout.md).**
 
 ## Button controls
@@ -93,12 +93,20 @@ Hold the button ≥ 8 s while off (or on first use) to start the portal:
 ## Build & flash
 
 PlatformIO (pioarduino). Two steps — firmware and the portal's web UI (a single
-`app/index.html` packed into SPIFFS):
+`app/index.html` packed into SPIFFS).
 
+**ESP32-DevKitC (`esp32dev`, default):**
 ```bash
-pio run -t upload     # firmware (env: esp32dev)
-pio run -t uploadfs   # web UI filesystem
+pio run -e esp32dev -t upload     # firmware
+pio run -e esp32dev -t uploadfs   # web UI filesystem
 ```
+
+**AI-Thinker ESP32-CAM (`esp32cam`):**
+```bash
+pio run -e esp32cam -t upload     # firmware
+pio run -e esp32cam -t uploadfs   # web UI filesystem
+```
+> *ESP32-CAM flashing note*: Use a USB-to-UART adapter (or ESP32-CAM-MB base board). Connect **GPIO0 to GND** before powering on to enter download mode; disconnect GPIO0 and reset to run.
 
 ## Notes
 
@@ -107,5 +115,5 @@ pio run -t uploadfs   # web UI filesystem
   settings; the portal then asks for the new adapter MAC.
 - **WiFi TX power** for the portal's SoftAP is `AP_TX_POWER` in
   [include/board.h](include/board.h).
-- Serial debug runs over the DevKitC's USB-UART at **115200** baud.
+- Serial debug runs at **115200** baud.
 - Pin assignments and all timing constants live in [include/board.h](include/board.h).

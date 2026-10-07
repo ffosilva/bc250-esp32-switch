@@ -1,30 +1,38 @@
-# Pinout & wiring (ESP32-WROOM / DevKitC)
+# Pinout & wiring (ESP32-DevKitC & AI-Thinker ESP32-CAM)
 
-Wiring reference for the BC250 power switch on an **ESP32-DevKitC (38-pin, ESP32-WROOM-32)**.
-Pin numbers live in [include/board.h](../include/board.h) — change them there if you
-rewire.
+Wiring reference for the BC250 power switch on an **ESP32-DevKitC (38-pin, ESP32-WROOM-32)**
+or an **AI-Thinker ESP32-CAM (ESP-32S module)**.
+Pin numbers live in [include/board.h](../include/board.h) — conditionally selected by the
+active PlatformIO environment (`esp32dev` vs `esp32cam`).
 
 ## GPIO assignment
 
-| Signal | GPIO | DevKitC header | Connects to | Notes |
-|--------|------|----------------|-------------|-------|
-| `BUTTON_SENSE` | **25** | left | Momentary switch, terminal A | Internal pull-up; pressed reads LOW |
-| `BUTTON_GND` | **26** | left | Momentary switch, terminal B | Driven LOW as the switch's ground |
-| `PS_ON_PIN` | **32** | left | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
-| `BOARD_SENSE` | **34** | left | BC250 `TPMS1` pin 9 | ~3.3 V when the board is up, 0 when off. **ADC1**, input-only |
-| `5V` / `VIN` | — | left | PSU `+5VSB` | Permanent power for the ESP32 |
-| `GND` | — | either | PSU GND + board GND | Common ground |
+| Signal | DevKitC | ESP32-CAM | Connects to | Notes |
+|--------|---------|-----------|-------------|-------|
+| `BUTTON_SENSE` | **GPIO25** | **GPIO15** | Momentary switch, terminal A | Internal pull-up; pressed reads LOW |
+| `BUTTON_GND` | **GPIO26** | **GND** | Momentary switch, terminal B | DevKitC drives 26 LOW; CAM wires to header GND |
+| `PS_ON_PIN` | **GPIO32** | **GPIO14** | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
+| `BOARD_SENSE` | **GPIO34** | **GPIO13** | BC250 `TPMS1` pin 9 | ~3.3 V when up, 0 when off (ADC with hysteresis) |
+| `5V` / `VIN` | **5V** | **5V** | PSU `+5VSB` | Permanent power for the ESP |
+| `GND` | **GND** | **GND** | PSU GND + board GND | Common ground |
 
-Why these pins:
+### Pin rationale
 
-- **GPIO34 is ADC1** (ADC1_CH6). ADC2 can't be read while WiFi is running (setup
-  portal), so the analog board-sense must be on ADC1. GPIO34 is input-only, which is
-  all it needs.
-- **GPIO32** is high-impedance at reset, so `PS_ON#` stays released (PSU off) while
-  the ESP32 boots. It is not a strapping pin.
-- GPIO25/26 are plain GPIOs with no boot-time function.
-- Avoided on purpose: strapping pins (GPIO0, 2, 5, 12, 15) and the flash pins
-  (GPIO6–11).
+**On ESP32 DevKitC:**
+- **GPIO34 is ADC1** (ADC1_CH6). ADC2 can't be read while WiFi is running (setup portal), so the analog board-sense must be on ADC1. GPIO34 is input-only.
+- **GPIO32** is high-impedance at reset, so `PS_ON#` stays released (PSU off) while the ESP32 boots. Not a strapping pin.
+- **GPIO25/26** are general GPIOs with no boot-time function.
+
+**On AI-Thinker ESP32-CAM:**
+- Almost all GPIOs are taken by the camera, SD card socket, flash LED, and PSRAM.
+- **GPIO13** (ADC2_CH4) is used for `BOARD_SENSE`. All ADC1 pins (GPIO32–39) are internally dedicated to the camera or red LED. ADC2 cannot be sampled when WiFi is running; however, board power sensing only runs in normal operation (WiFi off).
+- **GPIO14** is free from strapping functions and used as open-drain for `PS_ON#`.
+- **GPIO15** has an internal pull-up and is used for `BUTTON_SENSE`. Terminal B connects directly to the header `GND` pin (saving a GPIO pin).
+- **Pins avoided on ESP32-CAM**:
+  - `GPIO12`: Strapping pin MTDI (if pulled HIGH at boot by 3.3 V TPMS1, sets flash VDD to 1.8 V and prevents boot).
+  - `GPIO4`: Tied to the high-power white flashlight LED.
+  - `GPIO16`: Connected to the external PSRAM chip CS line.
+  - `GPIO0`: Boot mode strapping pin (must be LOW to flash, HIGH to boot).
 
 ## DevKitC header (left column, USB at the bottom)
 
@@ -54,6 +62,25 @@ All four signals and power are on the **left** header (the side with `EN`, `VP`,
 
 > Header order can differ slightly between DevKitC clones. **Go by the silkscreen labels**
 > (`IO25`, `IO26`, `IO32`, `IO34`, `5V`, `GND`), not the physical position.
+
+## AI-Thinker ESP32-CAM header
+
+The ESP32-CAM has two 8-pin headers (antenna at top):
+
+```
+         ┌─────────────────────────┐
+         │       [ Antenna ]       │
+         │                         │
+         │ IO12               3V3  │
+         │ IO13 ◄─ TPMS1 pin 9 GND │
+         │ IO15 ◄─ switch A   IO0  │  (IO0 to GND to flash)
+         │ IO14 ──► PS_ON#    U0TX │
+         │ IO2                U0RX │
+         │ IO4  (flash LED)   IO16 │  (PSRAM)
+         │ GND  ◄─ common/swB GND  │
+         │ 5V   ◄─ PSU +5VSB  VCC  │
+         └─────────────────────────┘
+```
 
 ## Connections
 
@@ -155,3 +182,6 @@ as an **analog** voltage (16× oversampled, with hysteresis) rather than a digit
 - The DevKitC's USB-UART bridge (CP210x/CH340) is used for flashing and the serial log
   (115200 baud). No `BOOT`/`EN` button handling is needed on most boards; if upload
   fails to connect, hold `BOOT` while it says `Connecting...`.
+- For the **ESP32-CAM**, use an external USB-to-UART adapter (or ESP32-CAM-MB daughterboard)
+  connected to `U0TX` and `U0RX`. Jumper **`IO0` to `GND`** before powering on to enter
+  flashing mode; disconnect `IO0` from `GND` and reset the module to boot the firmware.

@@ -201,8 +201,10 @@ void portalBegin() {
   // Keep the PSU off and the button readable while configuring.
   pinMode(PS_ON_PIN, OUTPUT_OPEN_DRAIN);
   digitalWrite(PS_ON_PIN, PS_ON_RELEASE);
-  pinMode(BUTTON_GND, OUTPUT);
-  digitalWrite(BUTTON_GND, LOW);
+  if (BUTTON_GND >= 0) {
+    pinMode(BUTTON_GND, OUTPUT);
+    digitalWrite(BUTTON_GND, LOW);
+  }
   pinMode(BUTTON_SENSE, INPUT_PULLUP);
 
   if (!SPIFFS.begin(true)) {

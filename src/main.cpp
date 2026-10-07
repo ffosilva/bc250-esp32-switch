@@ -184,9 +184,11 @@ static void normalBegin() {
   pinMode(PS_ON_PIN, OUTPUT_OPEN_DRAIN);
   digitalWrite(PS_ON_PIN, PS_ON_RELEASE);
 
-  // Switch: GPIO6 = local ground, GPIO5 = sensed input with pull-up.
-  pinMode(BUTTON_GND, OUTPUT);
-  digitalWrite(BUTTON_GND, LOW);
+  // Switch: optional local ground pin, sensed input with pull-up.
+  if (BUTTON_GND >= 0) {
+    pinMode(BUTTON_GND, OUTPUT);
+    digitalWrite(BUTTON_GND, LOW);
+  }
   pinMode(BUTTON_SENSE, INPUT_PULLUP);
 
   // TPMS1 sense: read as ADC over the full 0-3.3V range.
