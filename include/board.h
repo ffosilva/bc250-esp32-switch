@@ -10,19 +10,20 @@
 //   GPIO15 (BUTTON_SENSE)  <-----> momentary switch terminal A
 //   GND                    <-----> momentary switch terminal B
 //   GPIO14 (PS_ON_PIN)     <-----> ATX PS_ON# (green wire, active LOW)
-//   GPIO13 (BOARD_SENSE)   <-----> BC250 TPMS1 pin 9 (ADC2_CH4)
+//   GPIO13 (BOARD_SENSE)   <-----> BC250 TPMS1 pin 9 (digital, INPUT_PULLDOWN)
 //
 // The ESP32-CAM dedicates most pins to the camera, flash LED, and SD card.
 // Switch terminal B is wired directly to header GND (BUTTON_GND = -1).
 // GPIO12 is intentionally avoided because it is strapping pin MTDI (pulling it
 // HIGH at boot sets flash VDD to 1.8V and bricks boot).
-// GPIO13 is ADC2_CH4. ADC2 cannot be sampled while WiFi is running; however,
-// board sense is only required during normal operation (WiFi is off).
+// GPIO13 is read as digital input with internal pull-down (INPUT_PULLDOWN).
+// ADC2 cannot be sampled when Bluetooth or WiFi is active, and GPIO13 is shared
+// with SD DAT3 which floats HIGH unless pulled down.
 const int BUTTON_SENSE = 15;
 const int BUTTON_GND   = -1; // -1 means wired to physical GND header
 
 const int PS_ON_PIN    = 14;
-const int BOARD_SENSE  = 13; // ADC2_CH4
+const int BOARD_SENSE  = 13;
 
 #else
 // Standard ESP32-WROOM (DevKitC) wiring:

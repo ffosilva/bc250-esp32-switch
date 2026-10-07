@@ -12,7 +12,7 @@ active PlatformIO environment (`esp32dev` vs `esp32cam`).
 | `BUTTON_SENSE` | **GPIO25** | **GPIO15** | Momentary switch, terminal A | Internal pull-up; pressed reads LOW |
 | `BUTTON_GND` | **GPIO26** | **GND** | Momentary switch, terminal B | DevKitC drives 26 LOW; CAM wires to header GND |
 | `PS_ON_PIN` | **GPIO32** | **GPIO14** | ATX `PS_ON#` (green wire) | **Open-drain**, active LOW: LOW = PSU on, released = off |
-| `BOARD_SENSE` | **GPIO34** | **GPIO13** | BC250 `TPMS1` pin 9 | ~3.3 V when up, 0 when off (ADC with hysteresis) |
+| `BOARD_SENSE` | **GPIO34** | **GPIO13** | BC250 `TPMS1` pin 9 | ~3.3 V when up, 0 when off (DevKitC: ADC with hysteresis; CAM: digital INPUT_PULLDOWN) |
 | `5V` / `VIN` | **5V** | **5V** | PSU `+5VSB` | Permanent power for the ESP |
 | `GND` | **GND** | **GND** | PSU GND + board GND | Common ground |
 
@@ -25,7 +25,7 @@ active PlatformIO environment (`esp32dev` vs `esp32cam`).
 
 **On AI-Thinker ESP32-CAM:**
 - Almost all GPIOs are taken by the camera, SD card socket, flash LED, and PSRAM.
-- **GPIO13** (ADC2_CH4) is used for `BOARD_SENSE`. All ADC1 pins (GPIO32–39) are internally dedicated to the camera or red LED. ADC2 cannot be sampled when WiFi is running; however, board power sensing only runs in normal operation (WiFi off).
+- **GPIO13** is used for `BOARD_SENSE` as a digital input with internal pull-down (`INPUT_PULLDOWN`). All ADC1 pins (GPIO32–39) are internally dedicated to the camera or red LED. ADC2 cannot be sampled when Bluetooth or WiFi is active, and GPIO13 is shared with the SD DAT3 line which floats HIGH unless pulled down.
 - **GPIO14** is free from strapping functions and used as open-drain for `PS_ON#`.
 - **GPIO15** has an internal pull-up and is used for `BUTTON_SENSE`. Terminal B connects directly to the header `GND` pin (saving a GPIO pin).
 - **Pins avoided on ESP32-CAM**:

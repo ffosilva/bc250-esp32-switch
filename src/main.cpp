@@ -73,6 +73,16 @@ static void setState(PowerState next) {
   if (btWakeActive) btSetConnectable(next == STATE_OFF);
 }
 
+#if defined(BOARD_ESP32CAM)
+// ESP32-CAM: GPIO13 is on ADC2, which cannot be sampled while Bluetooth is
+// running. It is also shared with SD DAT3 which floats HIGH unless pulled down.
+// We configure GPIO13 with INPUT_PULLDOWN and read it digitally.
+static bool readBoardSense(uint32_t *outMv = nullptr) {
+  bool high = (digitalRead(BOARD_SENSE) == HIGH);
+  if (outMv) *outMv = high ? 3300 : 0;
+  return high;
+}
+#else
 // Raw (pre-time-debounce) board-up level, derived from the TPMS1 voltage with
 // hysteresis so a signal hovering near the logic threshold doesn't chatter.
 static bool senseLevel = false;
@@ -102,6 +112,7 @@ static bool readBoardSense(uint32_t *outMv = nullptr) {
   }
   return senseLevel;
 }
+#endif
 
 static void psuOn() {
   digitalWrite(PS_ON_PIN, PS_ON_ASSERT);
@@ -191,8 +202,12 @@ static void normalBegin() {
   }
   pinMode(BUTTON_SENSE, INPUT_PULLUP);
 
+#if defined(BOARD_ESP32CAM)
+  pinMode(BOARD_SENSE, INPUT_PULLDOWN);
+#else
   // TPMS1 sense: read as ADC over the full 0-3.3V range.
   analogSetAttenuation(ADC_11db);  // global; the per-pin call errors before the first read
+#endif
 
   // Seed debounced states from the current levels.
   buttonStable = buttonLastRaw = (digitalRead(BUTTON_SENSE) == LOW);
