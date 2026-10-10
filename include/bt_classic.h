@@ -1,14 +1,16 @@
 #pragma once
 
 #include <Arduino.h>
+#include <vector>
+
 
 // Raw-HCI (VHCI) Classic Bluetooth layer. There is no Bluedroid host stack: the
 // ESP32 never accepts a link. It only
 //   * impersonates the BC250's Bluetooth adapter (same BD_ADDR) while the machine
-//     is OFF, rejecting every incoming Connection_Request. A request from the
+//     is OFF, rejecting every incoming Connection_Request. A request from any
 //     bound controller counts as "controller present" (wake). Rejecting before
 //     any link/authentication exists leaves the controller's pairing untouched.
-//   * (portal only) runs periodic Inquiry to list nearby discoverable devices.
+//   * (portal only) runs interactive page listening and periodic Inquiry.
 
 // Validate a "aa:bb:cc:dd:ee:ff" style address (case-insensitive).
 bool btValidMac(const String &mac);
@@ -27,10 +29,23 @@ void btSetConnectable(bool on);
 void btLoop();
 
 // ---- Normal mode: bound-controller presence -------------------------------
+void btSetWakeAddrs(const std::vector<String> &addrs);
 void btSetWakeAddr(const String &addr);
-// True if the bound controller has ever paged us;
+// True if any bound controller has ever paged us;
 // *lastSeenMs = millis() of the most recent sighting.
 bool btWakeSeen(unsigned long *lastSeenMs);
+
+// ---- Portal: interactive listener ----------------------------------------
+struct BtListenerResult {
+  bool     detected;
+  char     addr[18];
+  char     name[33];
+  uint32_t cod;
+};
+
+void             btListenerStart();
+BtListenerResult btListenerGetStatus();
+String           btResolveHeuristicName(const char *mac, uint32_t cod);
 
 // ---- Portal: device discovery ---------------------------------------------
 struct BtDev {
@@ -45,3 +60,4 @@ struct BtDev {
 
 void btSetDiscovery(bool on);
 int  btSnapshotDevices(BtDev *out, int max);  // returns number of used entries
+

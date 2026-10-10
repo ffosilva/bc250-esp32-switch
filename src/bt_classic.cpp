@@ -144,10 +144,15 @@ static void pumpQueue() {
 // ---- State shared with the controller task ---------------------------------
 static portMUX_TYPE stMux = portMUX_INITIALIZER_UNLOCKED;
 
-static uint8_t       wakeAddrBytes[6] = {0};  // HCI (little-endian) order
-static bool          wakeAddrSet      = false;
+static const int MAX_WAKE_ADDRS = 8;
+static uint8_t   wakeAddrs[MAX_WAKE_ADDRS][6];  // HCI (little-endian) order
+static int       wakeAddrCount = 0;
 static volatile bool          wakeSeenEver = false;
 static volatile unsigned long wakeLastSeen = 0;
+
+static BtListenerResult listenerResult = {false, "", "", 0};
+static volatile bool    listenerActive = false;
+
 
 static bool          connectable = false;      // requested page-scan state
 
@@ -313,22 +318,50 @@ static int onHostRecv(uint8_t *data, uint16_t len) {
     case EVT_CONN_REQUEST:
       if (plen >= 10) {
         bool isWake = false;
+        char fromAddr[18];
+        leToStr(p, fromAddr);
+        uint32_t cod = p[6] | (p[7] << 8) | (p[8] << 16);
+
         portENTER_CRITICAL(&stMux);
-        if (wakeAddrSet && memcmp(p, wakeAddrBytes, 6) == 0) {
-          wakeLastSeen = millis();
-          wakeSeenEver = true;
-          isWake = true;
+        for (int i = 0; i < wakeAddrCount; i++) {
+          if (memcmp(p, wakeAddrs[i], 6) == 0) {
+            wakeLastSeen = millis();
+            wakeSeenEver = true;
+            isWake = true;
+            break;
+          }
+        }
+
+        // Record for interactive listener mode
+        listenerResult.detected = true;
+        strncpy(listenerResult.addr, fromAddr, sizeof(listenerResult.addr) - 1);
+        listenerResult.addr[sizeof(listenerResult.addr) - 1] = 0;
+        listenerResult.cod = cod;
+        listenerResult.name[0] = 0;
+        for (int i = 0; i < MAX_DEVS; i++) {
+          if (devs[i].used && strcmp(devs[i].addr, fromAddr) == 0 && devs[i].name[0]) {
+            strncpy(listenerResult.name, devs[i].name, sizeof(listenerResult.name) - 1);
+            listenerResult.name[sizeof(listenerResult.name) - 1] = 0;
+            break;
+          }
         }
         portEXIT_CRITICAL(&stMux);
-        uint32_t cod = p[6] | (p[7] << 8) | (p[8] << 16);
+
         recordDevice(p, "", 0, cod, true);  // learn mode: paired controllers
+
+        // If listener doesn't have a name yet, immediately request remote name
+        if (listenerResult.name[0] == 0) {
+          uint8_t req[10] = {0};
+          memcpy(req, p, 6);
+          req[6] = 0x01;  // R1
+          enqueue(OP_REMOTE_NAME_REQ, req, sizeof(req));
+        }
+
         // Reject before any link/authentication exists -> pairing untouched.
         uint8_t params[7];
         memcpy(params, p, 6);
         params[6] = REJECT_UNACCEPTABLE_ADDR;
         enqueue(OP_REJECT_CONN_REQ, params, sizeof(params));
-        char fromAddr[18];
-        leToStr(p, fromAddr);
         Serial.printf("[BT  ] Connection_Request from %s (wake match: %s, rejecting)\n",
                       fromAddr, isWake ? "YES" : "NO");
       }
@@ -360,8 +393,17 @@ static int onHostRecv(uint8_t *data, uint16_t len) {
         if (n > sizeof(name) - 1) n = sizeof(name) - 1;
         memcpy(name, p + 7, n);  // NUL-padded by the controller
         recordDevice(p + 1, name, 0, 0, false);
+        char addr[18];
+        leToStr(p + 1, addr);
+        portENTER_CRITICAL(&stMux);
+        if (listenerResult.detected && strcmp(listenerResult.addr, addr) == 0) {
+          strncpy(listenerResult.name, name, sizeof(listenerResult.name) - 1);
+          listenerResult.name[sizeof(listenerResult.name) - 1] = 0;
+        }
+        portEXIT_CRITICAL(&stMux);
       }
       break;
+
 
     default:
       Serial.printf("[BT  ] Unhandled HCI event: 0x%02X (plen=%u)\n", code, plen);
@@ -496,22 +538,103 @@ void btSetConnectable(bool on) {
   Serial.printf("[BT  ] page scan requested: %s\n", on ? "ON" : "OFF");
 }
 
-void btSetWakeAddr(const String &addr) {
-  bool valid = btValidMac(addr);
-  uint8_t be[6] = {0};
-  if (valid) parseMac(addr, be);
+void btSetWakeAddrs(const std::vector<String> &addrs) {
   portENTER_CRITICAL(&stMux);
-  wakeAddrSet = valid;
-  if (valid) {
-    for (int i = 0; i < 6; i++) wakeAddrBytes[i] = be[5 - i];  // -> HCI order
+  wakeAddrCount = 0;
+  for (const auto &addr : addrs) {
+    if (wakeAddrCount >= MAX_WAKE_ADDRS) break;
+    if (btValidMac(addr)) {
+      uint8_t be[6];
+      parseMac(addr, be);
+      for (int i = 0; i < 6; i++) {
+        wakeAddrs[wakeAddrCount][i] = be[5 - i];  // -> HCI order
+      }
+      wakeAddrCount++;
+    }
   }
   portEXIT_CRITICAL(&stMux);
+  Serial.printf("[BT  ] set %d wake controller address(es)\n", wakeAddrCount);
+}
+
+void btSetWakeAddr(const String &addr) {
+  std::vector<String> addrs;
+  if (!addr.isEmpty()) addrs.push_back(addr);
+  btSetWakeAddrs(addrs);
 }
 
 bool btWakeSeen(unsigned long *lastSeenMs) {
   if (lastSeenMs) *lastSeenMs = wakeLastSeen;
   return wakeSeenEver;
 }
+
+void btListenerStart() {
+  portENTER_CRITICAL(&stMux);
+  listenerResult.detected = false;
+  listenerResult.addr[0] = 0;
+  listenerResult.name[0] = 0;
+  listenerResult.cod = 0;
+  listenerActive = true;
+  portEXIT_CRITICAL(&stMux);
+  Serial.println("[BT  ] listener started");
+}
+
+BtListenerResult btListenerGetStatus() {
+  BtListenerResult res;
+  portENTER_CRITICAL(&stMux);
+  res = listenerResult;
+  if (res.detected && res.name[0] == 0) {
+    for (int i = 0; i < MAX_DEVS; i++) {
+      if (devs[i].used && strcmp(devs[i].addr, res.addr) == 0 && devs[i].name[0]) {
+        strncpy(res.name, devs[i].name, sizeof(res.name) - 1);
+        res.name[sizeof(res.name) - 1] = 0;
+        strncpy(listenerResult.name, devs[i].name, sizeof(listenerResult.name) - 1);
+        listenerResult.name[sizeof(listenerResult.name) - 1] = 0;
+        break;
+      }
+    }
+  }
+  portEXIT_CRITICAL(&stMux);
+  return res;
+}
+
+String btResolveHeuristicName(const char *mac, uint32_t cod) {
+  if (!mac || strlen(mac) < 8) return "Wireless Gamepad";
+  String s = mac;
+  s.toLowerCase();
+  String prefix = s.substring(0, 8);  // "aa:bb:cc"
+
+  // Sony Interactive Entertainment OUIs
+  if (prefix == "00:1b:fb" || prefix == "98:b6:e9" || prefix == "fc:62:b9" ||
+      prefix == "00:04:1f" || prefix == "2c:cc:44" || prefix == "70:9e:29" ||
+      prefix == "e8:47:3a" || prefix == "00:26:5c") {
+    return "PlayStation Controller";
+  }
+
+  // Microsoft OUIs
+  if (prefix == "5c:ba:37" || prefix == "7c:ed:8d" || prefix == "98:5f:d3" ||
+      prefix == "28:18:78" || prefix == "e4:17:d8" || prefix == "00:50:f2" ||
+      prefix == "dc:97:ba") {
+    return "Xbox Wireless Controller";
+  }
+
+  // Nintendo OUIs
+  if (prefix == "00:21:4d" || prefix == "94:58:cb" || prefix == "00:09:bf" ||
+      prefix == "58:2f:40" || prefix == "e0:e7:51") {
+    return "Nintendo Switch Controller";
+  }
+
+  // Class of Device (CoD)
+  uint8_t major = (cod >> 8) & 0x1F;
+  uint8_t minor = (cod >> 2) & 0x3F;
+  if (major == 0x05) {
+    if (minor & 0x08) return "Gamepad";
+    if (minor & 0x04) return "Joystick";
+    return "Wireless Peripheral";
+  }
+
+  return "Wireless Controller";
+}
+
 
 void btSetDiscovery(bool on) { discovery = on; }
 

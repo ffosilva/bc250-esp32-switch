@@ -11,18 +11,29 @@ bool wakeNeedsHostAddr() {
 }
 
 bool wakeBegin() {
-  if (config.wakeAddr.isEmpty() || config.hostAddr.isEmpty()) {
+  if (config.controllers.empty() && config.wakeAddr.isEmpty()) {
     Serial.println("[BT  ] controller/host not configured; BT wake disabled "
                    "(hold button 8s while OFF to configure)");
+    return false;
+  }
+  if (config.hostAddr.isEmpty()) {
+    Serial.println("[BT  ] host not configured; BT wake disabled");
     return false;
   }
   if (!btBegin(config.hostAddr)) {
     Serial.println("[BT  ] init failed; BT wake disabled");
     return false;
   }
-  btSetWakeAddr(config.wakeAddr);
-  Serial.printf("[BT  ] waiting for controller %s (as host %s)\n",
-                config.wakeAddr.c_str(), config.hostAddr.c_str());
+  std::vector<String> addrs;
+  for (const auto &c : config.controllers) {
+    addrs.push_back(c.mac);
+  }
+  if (addrs.empty() && !config.wakeAddr.isEmpty()) {
+    addrs.push_back(config.wakeAddr);
+  }
+  btSetWakeAddrs(addrs);
+  Serial.printf("[BT  ] waiting for %d controller(s) (as host %s)\n",
+                (int)addrs.size(), config.hostAddr.c_str());
   return true;
 }
 

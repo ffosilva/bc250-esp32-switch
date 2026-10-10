@@ -25,7 +25,7 @@
     button.secondary { background:transparent; color:var(--accent2); border:1px solid var(--accent2); }
     .msg { font-size:13px; margin-top:12px; min-height:18px; }
     .msg.err { color:var(--err); } .msg.ok { color:var(--ok); }
-    .hidden { display:none; }
+    .hidden { display:none !important; }
     .dev { display:flex; align-items:center; gap:10px; padding:11px; border-radius:8px;
            border:1px solid #333; margin-bottom:8px; cursor:pointer; background:#161616; }
     .dev.sel { border-color:var(--accent); background:#2a2715; }
@@ -39,6 +39,24 @@
     .help { color:var(--muted); font-size:12px; line-height:1.5; margin-top:10px; }
     .help code { color:var(--fg); }
     .scanning { color:var(--muted); font-size:12px; margin:6px 0; }
+
+    /* Multi-controller dashboard styles */
+    .ctrl-item { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-radius:8px; border:1px solid #333; margin-bottom:8px; background:#161616; gap:8px; }
+    .ctrl-info { flex:1; min-width:0; }
+    .ctrl-info b { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:14px; }
+    .ctrl-info small { color:var(--muted); font-size:12px; }
+    .ctrl-actions { display:flex; gap:6px; }
+    .btn-sm { padding:6px 10px; font-size:12px; margin:0; width:auto; border-radius:6px; }
+    .btn-danger { background:transparent; color:var(--err); border:1px solid #552222; }
+    .btn-danger:hover { background:var(--err); color:#fff; }
+    .btn-edit { background:transparent; color:var(--fg); border:1px solid #444; }
+    .btn-edit:hover { border-color:var(--accent); color:var(--accent); }
+
+    /* Modal styles */
+    .modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); display:flex; justify-content:center; align-items:center; z-index:100; padding:16px; }
+    .modal-card { width:100%; max-width:420px; background:var(--card); border-radius:12px; padding:20px; border:1px solid #333; }
+    .pulse-dot { width:40px; height:40px; border-radius:50%; background:var(--accent); margin:14px auto; opacity:0.8; animation:pulse 1.4s infinite ease-in-out; }
+    @keyframes pulse { 0%{transform:scale(0.8);opacity:0.3;} 50%{transform:scale(1.15);opacity:0.95;} 100%{transform:scale(0.8);opacity:0.3;} }
   </style>
 </head>
 <body>
@@ -77,17 +95,36 @@
       <div class="msg" id="host-msg"></div>
     </div>
 
-    <!-- Device selection screen -->
+    <!-- Controller screen -->
     <div class="card hidden" id="screen-dev">
-      <div style="font-size:15px;font-weight:bold">Select your controller</div>
-      <div class="sub" id="dev-sub" style="margin:6px 0 0">
-        Turn on a controller that is already paired to the BC250 (it shows as
-        <b>paired</b>), or put one in pairing mode (it shows up after a scan).
+      <div id="dev-header" style="font-size:15px;font-weight:bold">Bound controllers</div>
+      <div class="sub" id="dev-sub" style="margin:6px 0 12px">
+        Any bound controller can wake the BC250 from OFF. Up to 8 controllers supported.
       </div>
-      <div class="scanning" id="scan-state">Scanning…</div>
-      <div id="dev-list"></div>
-      <label for="manual">Or enter a MAC manually</label>
-      <input id="manual" placeholder="aa:bb:cc:dd:ee:ff" />
+
+      <!-- Classic BT Bound Controllers list -->
+      <div id="classic-controls">
+        <div id="ctrl-list"></div>
+        <div id="ctrl-empty" class="help" style="margin-bottom:12px">No controllers bound yet. Click below to add one.</div>
+
+        <button id="btn-add-ctrl" style="margin-top:6px">+ Add controller</button>
+
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid #333">
+          <label for="manual">Or enter MAC manually</label>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <input id="manual" placeholder="aa:bb:cc:dd:ee:ff" style="flex:1" />
+            <button id="btn-add-manual" class="secondary" style="margin:0;width:auto;padding:0 16px">Add</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- BLE discovery list (ESP32-C3 only) -->
+      <div id="ble-controls" class="hidden">
+        <div class="scanning" id="scan-state">Scanning…</div>
+        <div id="dev-list"></div>
+        <label for="ble-manual">Or enter MAC manually</label>
+        <input id="ble-manual" placeholder="aa:bb:cc:dd:ee:ff" />
+      </div>
 
       <!-- ESP32-CAM Flash LED wake option (hidden on other boards) -->
       <div id="cam-options" class="hidden" style="margin-top:16px;padding-top:14px;border-top:1px solid #333">
@@ -100,8 +137,38 @@
         </div>
       </div>
 
-      <button id="save-btn" disabled>Bind controller &amp; finish</button>
+      <button id="save-btn" disabled>Finish setup</button>
       <div class="msg" id="dev-msg"></div>
+    </div>
+  </div>
+
+  <!-- Interactive Listener Modal -->
+  <div class="modal-overlay hidden" id="listener-modal">
+    <div class="modal-card">
+      <div id="modal-listen-state">
+        <div style="font-weight:bold;font-size:16px;text-align:center">Pairing controller…</div>
+        <div class="pulse-dot"></div>
+        <div style="text-align:center;font-size:13px;line-height:1.5;color:var(--muted)">
+          Press the <b>PS</b>, <b>Xbox</b>, or <b>Home</b> button on the controller you want to pair.
+        </div>
+        <div class="help" style="text-align:center;margin-top:12px">
+          (Make sure it was already paired to your computer's Bluetooth adapter!)
+        </div>
+        <button id="modal-cancel-btn" class="secondary" style="margin-top:18px">Cancel</button>
+      </div>
+
+      <div id="modal-detected-state" class="hidden">
+        <div style="font-weight:bold;font-size:16px;color:var(--ok);text-align:center">Controller detected!</div>
+        <div style="text-align:center;margin-top:4px"><code id="detected-mac" style="font-size:14px;color:var(--accent)"></code></div>
+
+        <div id="already-bound-alert" class="msg err hidden" style="text-align:center;margin-top:6px">This controller is already bound.</div>
+
+        <label for="detected-name" style="margin-top:14px">Friendly name</label>
+        <input id="detected-name" placeholder="e.g. Living Room DualSense" />
+
+        <button id="modal-save-btn">Save controller</button>
+        <button id="modal-retry-btn" class="secondary" style="margin-top:8px">Try again</button>
+      </div>
     </div>
   </div>
 
@@ -109,11 +176,16 @@
     let token = null;
     let selected = null;
     let pollTimer = null;
+    let listenTimer = null;
     let needsHost = true;
     let mode = "classic";
     let isCam = false;
+    let boundControllers = [];
+    let detectedMac = "";
 
     const $ = (id) => document.getElementById(id);
+    const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const MAC_RE = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/;
 
     async function api(path, method = "GET", body = null) {
       const headers = {};
@@ -170,9 +242,6 @@
     };
 
     // --- Host adapter screen ---
-    const MAC_RE = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/;
-    const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-
     async function gotoHostScreen() {
       try {
         const st = await api("/api/status");
@@ -199,21 +268,162 @@
       }
     };
 
-    // --- Device screen ---
+    // --- Device / Controllers screen ---
     async function gotoDeviceScreen() {
-      try {
-        const st = await api("/api/status");
-        if (st.wakeAddr && !selected) {
-          $("manual").value = st.wakeAddr;
-          selected = st.wakeAddr;
-          refreshSel();
-        }
-      } catch (e) { /* ignore */ }
       show("dev");
-      pollDevices();
-      if (!pollTimer) pollTimer = setInterval(pollDevices, 2000);
+      await refreshControllers();
+
+      if (mode === "classic") {
+        $("classic-controls").classList.remove("hidden");
+        $("ble-controls").classList.add("hidden");
+        $("dev-header").textContent = "Bound controllers";
+        $("dev-sub").textContent = "Any bound controller can wake the BC250 from OFF. Up to 8 controllers supported.";
+      } else {
+        $("classic-controls").classList.add("hidden");
+        $("ble-controls").classList.remove("hidden");
+        $("dev-header").textContent = "Select your controller";
+        $("dev-sub").textContent = "Turn on your controller in BLE mode so it appears below.";
+        pollDevices();
+        if (!pollTimer) pollTimer = setInterval(pollDevices, 2000);
+      }
     }
 
+    async function refreshControllers() {
+      try {
+        const st = await api("/api/status");
+        boundControllers = st.controllers || [];
+        renderBoundList();
+      } catch (e) { /* ignore */ }
+    }
+
+    function renderBoundList() {
+      const listEl = $("ctrl-list");
+      listEl.innerHTML = "";
+      const count = boundControllers.length;
+      $("ctrl-empty").classList.toggle("hidden", count > 0);
+      $("btn-add-ctrl").disabled = count >= 8;
+      $("btn-add-ctrl").textContent = count >= 8 ? "Controller limit reached (8/8)" : "+ Add controller (" + count + "/8)";
+
+      boundControllers.forEach((c) => {
+        const item = document.createElement("div");
+        item.className = "ctrl-item";
+        item.innerHTML =
+          '<div class="ctrl-info"><b>' + esc(c.name || "Controller") + '</b>' +
+          '<small>' + esc(c.mac) + '</small></div>' +
+          '<div class="ctrl-actions">' +
+          '<button class="btn-sm btn-edit" data-mac="' + esc(c.mac) + '" data-name="' + esc(c.name) + '">Rename</button>' +
+          '<button class="btn-sm btn-danger" data-mac="' + esc(c.mac) + '">Remove</button>' +
+          '</div>';
+
+        item.querySelector(".btn-danger").onclick = () => removeCtrl(c.mac);
+        item.querySelector(".btn-edit").onclick = () => renameCtrlPrompt(c.mac, c.name);
+        listEl.appendChild(item);
+      });
+
+      if (mode === "classic") {
+        $("save-btn").disabled = count === 0;
+        $("save-btn").textContent = count > 0 ? "Finish setup" : "Bind at least 1 controller";
+      }
+    }
+
+    async function removeCtrl(mac) {
+      try {
+        await api("/api/controllers/remove", "POST", { mac });
+        await refreshControllers();
+      } catch (e) {
+        alert("Could not remove: " + e.message);
+      }
+    }
+
+    async function renameCtrlPrompt(mac, currentName) {
+      const newName = prompt("Enter new name for " + mac + ":", currentName);
+      if (newName === null || !newName.trim()) return;
+      try {
+        await api("/api/controllers/rename", "POST", { mac, name: newName.trim() });
+        await refreshControllers();
+      } catch (e) {
+        alert("Could not rename: " + e.message);
+      }
+    }
+
+    // --- Interactive Listener Modal ---
+    $("btn-add-ctrl").onclick = () => {
+      startListening();
+    };
+
+    $("modal-cancel-btn").onclick = () => {
+      stopListening();
+    };
+
+    $("modal-retry-btn").onclick = () => {
+      startListening();
+    };
+
+    async function startListening() {
+      $("listener-modal").classList.remove("hidden");
+      $("modal-listen-state").classList.remove("hidden");
+      $("modal-detected-state").classList.add("hidden");
+      try {
+        await api("/api/listener/start", "POST", {});
+      } catch (e) { /* ignore */ }
+      if (listenTimer) clearInterval(listenTimer);
+      listenTimer = setInterval(pollListener, 600);
+    }
+
+    function stopListening() {
+      if (listenTimer) { clearInterval(listenTimer); listenTimer = null; }
+      $("listener-modal").classList.add("hidden");
+    }
+
+    async function pollListener() {
+      try {
+        const res = await api("/api/listener/status");
+        if (res.detected) {
+          if (listenTimer) { clearInterval(listenTimer); listenTimer = null; }
+          detectedMac = res.mac;
+          $("detected-mac").textContent = res.mac;
+          $("detected-name").value = res.name || "Wireless Controller";
+          $("already-bound-alert").classList.toggle("hidden", !res.alreadyBound);
+          $("modal-save-btn").disabled = !!res.alreadyBound;
+          $("modal-listen-state").classList.add("hidden");
+          $("modal-detected-state").classList.remove("hidden");
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    $("modal-save-btn").onclick = async () => {
+      const name = $("detected-name").value.trim() || "Wireless Controller";
+      try {
+        $("modal-save-btn").disabled = true;
+        await api("/api/controllers/add", "POST", { mac: detectedMac, name });
+        stopListening();
+        await refreshControllers();
+      } catch (e) {
+        alert("Error saving: " + e.message);
+        $("modal-save-btn").disabled = false;
+      }
+    };
+
+    // Manual add
+    $("btn-add-manual").onclick = async () => {
+      const mac = $("manual").value.trim().toLowerCase();
+      if (!MAC_RE.test(mac)) {
+        alert("Please enter a valid MAC address (aa:bb:cc:dd:ee:ff).");
+        return;
+      }
+      try {
+        $("btn-add-manual").disabled = true;
+        await api("/api/controllers/add", "POST", { mac, name: "Controller " + (boundControllers.length + 1) });
+        $("manual").value = "";
+        await refreshControllers();
+      } catch (e) {
+        alert("Could not add: " + e.message);
+      } finally {
+        $("btn-add-manual").disabled = false;
+      }
+    };
+
+    // --- BLE Fallback Scan logic (ESP32-C3) ---
     function rssiBars(r) {
       if (r >= -55) return "▂▄▆█";
       if (r >= -67) return "▂▄▆";
@@ -224,7 +434,6 @@
     async function pollDevices() {
       try {
         const data = await api("/api/devices");
-        // Paired controllers (seen paging the host) first, then by signal.
         const list = (data.devices || []).sort(
           (a, b) => (b.paged - a.paged) || (b.rssi - a.rssi));
         $("scan-state").textContent = list.length
@@ -241,7 +450,7 @@
             "<small>" + esc(d.addr) + "</small></div>" +
             '<div class="rssi">' +
             (d.rssi ? rssiBars(d.rssi) + "<br>" + d.rssi + " dBm" : "&nbsp;") + "</div>";
-          el.onclick = () => { selected = d.addr; $("manual").value = ""; refreshSel(); };
+          el.onclick = () => { selected = d.addr; $("ble-manual").value = ""; refreshBleSel(); };
           box.appendChild(el);
         }
       } catch (e) {
@@ -249,13 +458,13 @@
       }
     }
 
-    $("manual").oninput = () => {
-      const v = $("manual").value.trim().toLowerCase();
-      selected = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(v) ? v : null;
-      refreshSel();
+    $("ble-manual").oninput = () => {
+      const v = $("ble-manual").value.trim().toLowerCase();
+      selected = MAC_RE.test(v) ? v : null;
+      refreshBleSel();
     };
 
-    function refreshSel() {
+    function refreshBleSel() {
       $("save-btn").disabled = !selected;
       document.querySelectorAll(".dev").forEach((el) => {
         const addr = el.querySelector("small").textContent;
@@ -277,13 +486,14 @@
         if (isCam) {
           await api("/api/settings", "POST", { flashOnWake: $("flash-on-wake").checked });
         }
-        await api("/api/select", "POST", { addr: selected });
+        if (mode !== "classic" && selected) {
+          await api("/api/select", "POST", { addr: selected });
+        }
         await api("/api/finish", "POST", {});
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        if (listenTimer) { clearInterval(listenTimer); listenTimer = null; }
         msg.className = "msg ok";
-        msg.textContent = "Bound " + selected + ". Rebooting into normal mode…";
-        $("scan-state").textContent = "";
-        $("dev-list").innerHTML = "";
+        msg.textContent = "Setup complete! Rebooting into normal operation mode…";
       } catch (e) {
         msg.className = "msg err"; msg.textContent = e.message;
         $("save-btn").disabled = false;
@@ -294,12 +504,9 @@
     (async () => {
       try {
         const st = await api("/api/status");
-        if (st.wakeAddr) $("subtitle").textContent = "Currently bound: " + st.wakeAddr;
+        if (st.wakeAddr) $("subtitle").textContent = "Configured: " + st.wakeAddr;
         if (st.needsHost !== undefined) needsHost = !!st.needsHost;
         if (st.mode) mode = st.mode;
-        if (!needsHost) {
-          $("dev-sub").textContent = "Turn on your controller in BLE mode so it appears below.";
-        }
         isCam = !!st.isCam;
         if (isCam) {
           $("cam-options").classList.remove("hidden");

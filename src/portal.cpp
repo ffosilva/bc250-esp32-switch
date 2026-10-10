@@ -13,6 +13,10 @@
 #include "board.h"
 #include "wake.h"
 #include "config.h"
+#if !defined(WAKE_BLE)
+#include "bt_classic.h"
+#endif
+
 
 static const size_t MIN_PASSWORD_LEN = 6;
 
@@ -84,10 +88,19 @@ static void handleStatus(AsyncWebServerRequest *req) {
 #else
   doc["isCam"]       = false;
 #endif
+
+  JsonArray arr = doc["controllers"].to<JsonArray>();
+  for (const auto &c : config.controllers) {
+    JsonObject o = arr.add<JsonObject>();
+    o["mac"]  = c.mac;
+    o["name"] = c.name;
+  }
+
   String out;
   serializeJson(doc, out);
   req->send(200, "application/json", out);
 }
+
 
 static void handlePassword(AsyncWebServerRequest *req, JsonVariant &json) {
   JsonObject o = json.as<JsonObject>();
@@ -186,6 +199,102 @@ static void handleSelect(AsyncWebServerRequest *req, JsonVariant &json) {
   req->send(200, "application/json", "{\"ok\":true}");
 }
 
+static void handleListenerStart(AsyncWebServerRequest *req) {
+  if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
+#if !defined(WAKE_BLE)
+  btListenerStart();
+#endif
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void handleListenerStatus(AsyncWebServerRequest *req) {
+  if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
+  JsonDocument doc;
+#if !defined(WAKE_BLE)
+  BtListenerResult res = btListenerGetStatus();
+  doc["detected"] = res.detected;
+  if (res.detected) {
+    doc["mac"] = res.addr;
+    String name = res.name;
+    if (name.isEmpty()) {
+      name = btResolveHeuristicName(res.addr, res.cod);
+    }
+    doc["name"] = name;
+    bool already = false;
+    for (const auto &c : config.controllers) {
+      if (c.mac.equalsIgnoreCase(res.addr)) {
+        already = true;
+        break;
+      }
+    }
+    doc["alreadyBound"] = already;
+  }
+#else
+  doc["detected"] = false;
+#endif
+  String out;
+  serializeJson(doc, out);
+  req->send(200, "application/json", out);
+}
+
+static void handleControllersAdd(AsyncWebServerRequest *req, JsonVariant &json) {
+  if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
+  JsonObject o = json.as<JsonObject>();
+  String mac = o["mac"] | o["addr"] | "";
+  String name = o["name"] | "";
+  mac.trim();
+  mac.toLowerCase();
+  if (!wakeValidMac(mac)) {
+    sendJsonError(req, 400, "invalid address");
+    return;
+  }
+  if (config.controllers.size() >= MAX_CONTROLLERS) {
+    sendJsonError(req, 400, "controller limit reached (max 8)");
+    return;
+  }
+  if (!addController(mac, name)) {
+    sendJsonError(req, 400, "could not add controller");
+    return;
+  }
+  Serial.printf("[PORTAL] added controller %s (%s)\n", mac.c_str(), name.c_str());
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void handleControllersRemove(AsyncWebServerRequest *req, JsonVariant &json) {
+  if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
+  JsonObject o = json.as<JsonObject>();
+  String mac = o["mac"] | o["addr"] | "";
+  mac.trim();
+  mac.toLowerCase();
+  if (!removeController(mac)) {
+    sendJsonError(req, 404, "controller not found");
+    return;
+  }
+  Serial.printf("[PORTAL] removed controller %s\n", mac.c_str());
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+static void handleControllersRename(AsyncWebServerRequest *req, JsonVariant &json) {
+  if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
+  JsonObject o = json.as<JsonObject>();
+  String mac = o["mac"] | o["addr"] | "";
+  String name = o["name"] | "";
+  mac.trim();
+  mac.toLowerCase();
+  name.trim();
+  if (name.isEmpty()) {
+    sendJsonError(req, 400, "name cannot be empty");
+    return;
+  }
+  if (!renameController(mac, name)) {
+    sendJsonError(req, 404, "controller not found");
+    return;
+  }
+  Serial.printf("[PORTAL] renamed controller %s to %s\n", mac.c_str(), name.c_str());
+  req->send(200, "application/json", "{\"ok\":true}");
+}
+
+
 static void handleSettings(AsyncWebServerRequest *req, JsonVariant &json) {
   if (!authed(req)) { sendJsonError(req, 401, "unauthorized"); return; }
 #if defined(BOARD_ESP32CAM)
@@ -242,6 +351,8 @@ void portalBegin() {
   server.on("/api/bt/devices", HTTP_GET, handleDevices);
   server.on("/api/ble/devices", HTTP_GET, handleDevices);
   server.on("/api/finish", HTTP_POST, handleFinish);
+  server.on("/api/listener/start", HTTP_POST, handleListenerStart);
+  server.on("/api/listener/status", HTTP_GET, handleListenerStatus);
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/password", handlePassword));
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/login", handleLogin));
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/host", handleHost));
@@ -249,7 +360,11 @@ void portalBegin() {
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/select", handleSelect));
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/bt/select", handleSelect));
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/ble/select", handleSelect));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/controllers/add", handleControllersAdd));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/controllers/remove", handleControllersRemove));
+  server.addHandler(new AsyncCallbackJsonWebHandler("/api/controllers/rename", handleControllersRename));
   server.addHandler(new AsyncCallbackJsonWebHandler("/api/settings", handleSettings));
+
 
   server.on("/", HTTP_GET, serveIndex);
   server.onNotFound([](AsyncWebServerRequest *req) {

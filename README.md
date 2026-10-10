@@ -72,10 +72,10 @@ and runs **continuous, interlaced page listening**:
 3. Once the machine is powering on, the ESP32 goes silent (stops answering pages). The
    controller's next attempt reaches the real BC250 adapter and connects normally.
 
-When a controller is bound (via the portal), the machine **follows the controller**:
-turn the controller on and the machine powers up. After a power-off there's a short
-guard window so the controller's reconnect burst can't immediately switch it back on —
-turn the controller off within that window to keep the machine down.
+When controllers are bound (via the portal), the machine **follows any of your bound controllers**:
+turn on any bound controller (up to 8 supported simultaneously) and the machine powers up.
+After a power-off there's a short guard window so the controller's reconnect burst can't immediately
+switch it back on — turn the controller off within that window to keep the machine down.
 
 Requirements:
 
@@ -90,11 +90,14 @@ Hold the button ≥ 8 s while off (or on first use) to start the portal:
 
 1. Connect to the open WiFi network **`BC250 Switch Setup`** and open `http://192.168.4.1`.
 2. Create a password.
-3. Enter the BC250's Bluetooth adapter MAC.
-4. Pick your controller: turn on a controller that's already paired to the BC250 (it
-   shows up as **paired**), or put one in pairing mode (it shows up after a scan). You
-   can also enter its MAC manually.
+3. Enter the BC250's Bluetooth adapter MAC (Classic BT targets).
+4. Manage controllers:
+   - Click **`+ Add controller`** to enter the interactive listener mode.
+   - Press the **PS / Xbox / Home button** on your gamepad; the switch instantly detects it.
+   - Review or customize the friendly name (e.g. *Living Room DualSense*) and save.
+   - Bind up to 8 controllers, or rename/remove existing ones anytime.
 5. Finish — the device reboots into normal operation.
+
 
 ## Build & flash
 

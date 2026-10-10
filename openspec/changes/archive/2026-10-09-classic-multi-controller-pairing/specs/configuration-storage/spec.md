@@ -1,9 +1,6 @@
-# Configuration Storage Specification
+# Spec Delta: configuration-storage
 
-## Purpose
-Manages persistent non-volatile storage for controller bindings, adapter MACs, credentials, and runtime options.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Persistent Storage of Configuration Parameters
 The system SHALL store and retrieve configuration keys from non-volatile storage under the 'bc250' namespace.
